@@ -1,0 +1,59 @@
+# Keep project artifacts like data, checkpoints, model weights, and evaluation
+# outputs in Git unless we explicitly decide otherwise.
+
+# OS / filesystem noise
+.DS_Store
+Thumbs.db
+
+# Editor / IDE state
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python cache / local environments
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+site/
+build/
+dist/
+.eggs/
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Local AI / tooling workspace folders
+.claude/
+.codex/
+graphify-out/
+
+# Generic local logs and temp files
+*.log
+tmp/
+temp/
+
+#The Word file
+Take_Home_Exercise_SouravMondal_SBDD.docx

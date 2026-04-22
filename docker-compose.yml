@@ -1,0 +1,107 @@
+version: "3.9"
+
+services:
+
+  # ── 1. SQL Server 2022 ────────────────────────────────────────────────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: ${ACCEPT_EULA:-Y}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-GnnBind0ptimizer!}
+      MSSQL_PID: ${MSSQL_PID:-Express}
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./docker/entrypoint-sqlserver.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools18/bin/sqlcmd", "-S", "localhost",
+             "-U", "sa", "-P", "${MSSQL_SA_PASSWORD:-GnnBind0ptimizer!}",
+             "-C", "-Q", "SELECT 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ── 2. MLflow (SQL Server backend) ───────────────────────────────────────
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow-artifacts
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  # ── 3. GNN trainer (runs once, exits) ────────────────────────────────────
+  gnn-trainer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.trainer
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+    volumes:
+      - ./data:/workspace/data
+      - ./checkpoints:/workspace/checkpoints
+      - ./src:/workspace/src
+      - ./notebooks:/workspace/notebooks
+    depends_on:
+      mlflow:
+        condition: service_started
+    restart: "no"
+
+  # ── 4. RL agent (depends on trained GNN checkpoint) ───────────────────────
+  rl-agent:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.rl
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      DB_SERVER: sqlserver
+      DB_PORT: "1433"
+      DB_NAME: gnnbind
+      DB_USER: sa
+      DB_PASSWORD: ${MSSQL_SA_PASSWORD:-GnnBind0ptimizer!}
+    volumes:
+      - ./data:/workspace/data
+      - ./checkpoints:/workspace/checkpoints
+      - ./src:/workspace/src
+      - ./notebooks:/workspace/notebooks
+    depends_on:
+      gnn-trainer:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # ── 5. Streamlit UI ───────────────────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.streamlit
+    environment:
+      DB_SERVER: sqlserver
+      DB_PORT: "1433"
+      DB_NAME: gnnbind
+      DB_USER: sa
+      DB_PASSWORD: ${MSSQL_SA_PASSWORD:-GnnBind0ptimizer!}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    volumes:
+      - ./data:/workspace/data
+      - ./checkpoints:/workspace/checkpoints
+      - ./src:/workspace/src
+      - ./app:/workspace/app
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+volumes:
+  sqlserver_data:
+  mlflow_artifacts:
