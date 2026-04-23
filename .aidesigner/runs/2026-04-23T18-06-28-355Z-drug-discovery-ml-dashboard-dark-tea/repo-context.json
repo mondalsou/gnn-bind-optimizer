@@ -1,0 +1,17 @@
+{
+  "repoRoot": "/Users/sourav/personal-github/gnn-bind-optimizer",
+  "cwd": "/Users/sourav/personal-github/gnn-bind-optimizer",
+  "stack": {
+    "frameworks": [],
+    "componentLibraries": [],
+    "styling": [],
+    "componentDirectories": [],
+    "packageFiles": []
+  },
+  "routes": [],
+  "tokens": {
+    "sources": [],
+    "tokens": []
+  },
+  "summary": "Repo root: /Users/sourav/personal-github/gnn-bind-optimizer\nWorking directory: /Users/sourav/personal-github/gnn-bind-optimizer\nFrameworks: none detected\nStyling: none detected\nComponent libraries: none detected\nRoute roots: app\nRoute candidates: none detected\nComponent directories: none detected\nToken sources: none detected\nVisible design language hints: no strong hints detected"
+}

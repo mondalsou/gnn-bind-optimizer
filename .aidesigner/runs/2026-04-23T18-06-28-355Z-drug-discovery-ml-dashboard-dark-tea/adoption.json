@@ -1,0 +1,34 @@
+{
+  "id": "2026-04-23T18-06-28-355Z-drug-discovery-ml-dashboard-dark-tea",
+  "createdAt": "2026-04-23T18:06:35.691Z",
+  "repoRoot": "/Users/sourav/personal-github/gnn-bind-optimizer",
+  "prompt": "Drug discovery ML dashboard — dark teal sidebar, warm cream bg, glassmorphism cards, SVG molecule panel, score bars",
+  "targetRouteHint": null,
+  "targetFileHint": null,
+  "detectedFrameworks": [],
+  "componentLibraries": [],
+  "stylingSystems": [],
+  "routeCandidates": [],
+  "tokenSources": [],
+  "componentDirectories": [],
+  "htmlStructure": {
+    "title": "GNNBindOptimizer",
+    "primaryHeading": "GNN Bind Opt",
+    "sectionCount": 0,
+    "buttonCount": 0,
+    "formCount": 0,
+    "cardLikeCount": 4,
+    "hasNavigation": true,
+    "hasFooter": false,
+    "hasPricingSignals": false,
+    "hasDashboardSignals": true
+  },
+  "recommendations": [
+    "Use the generated preview as the visual truth source while porting the layout."
+  ],
+  "warnings": [
+    "No frontend framework was detected. Validate the target surface manually before porting.",
+    "No obvious route targets were detected. Choose a target file deliberately before editing.",
+    "The artifact looks dashboard-like, but no dashboard route was detected automatically."
+  ]
+}
