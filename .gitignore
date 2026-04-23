@@ -48,6 +48,7 @@ ENV/
 # Local AI / tooling workspace folders
 .claude/
 .codex/
+.aidesigner/
 graphify-out/
 
 # Generic local logs and temp files
