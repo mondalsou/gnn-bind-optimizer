@@ -1,6 +1,13 @@
 # GNNBindOptimizer — Architecture
 
-## 1. Graph Construction
+## 1. Dataset & Graph Construction
+
+### Dataset
+PDBbind v2020 refined set, filtered to 150 protein–ligand complexes with measured pKd values.
+
+![EDA overview](data/processed/eda_nature.png)
+
+*Fig 1. Dataset statistics (n=150). a) pKd distribution — mean 6.4, range 2.0–11.9. b) Ligand molecular weight — mean 380 Da, majority below 500 (Lipinski compliant). c) Pocket residue count — mean 27, range 9–43. d) Protein–ligand interaction edge count per complex — mean 27, long tail to 94.*
 
 ### Why a heterogeneous graph?
 Protein-ligand binding involves two chemically distinct entity types (amino acid residues and small-molecule atoms) with fundamentally different feature spaces. A homogeneous GNN would require padding both to the same dimensionality, discarding the structural distinction. A heterogeneous graph (`torch_geometric.data.HeteroData`) preserves it natively and lets message-passing attend separately to intra-ligand, intra-pocket, and cross-interface edges.
@@ -25,9 +32,12 @@ The 5 Å interaction cutoff captures direct van-der-Waals and electrostatic cont
 
 ## 2. GNN Architecture — HeteroGNN (HGTConv)
 
-**Choice: Heterogeneous Graph Transformer (HGT)**
+![GNN architecture](Figs/GNN-model-arch.png)
 
-HGT uses type-specific attention heads and relation-specific key-query-value projections, making it the natural fit when node and edge types carry different semantics. Alternative choices and trade-offs:
+*Fig 2. HeteroGNN pipeline. Ligand atom graph and protein pocket residue graph are encoded together through 4 stacked HGTConv layers. Type-specific attentional pooling produces one embedding per modality; these are concatenated and passed through a shared MLP trunk before splitting into three task heads.*
+
+### Why Heterogeneous Graph Transformer (HGT)?
+HGT uses type-specific attention heads and relation-specific key-query-value projections, making it the natural fit when node and edge types carry different semantics.
 
 | Architecture | Pros | Cons |
 |---|---|---|
@@ -36,21 +46,26 @@ HGT uses type-specific attention heads and relation-specific key-query-value pro
 | GATConv (homogeneous) | Simpler; proven on molecular tasks | Loses protein/ligand distinction |
 | SchNet/DimeNet | Explicit 3D geometry | Requires high-quality docked poses; fragile to conformer errors |
 
-**Architecture details:**
+### Architecture details
 - 4 × `HGTConv` layers, hidden dim 128, 4 attention heads
 - Residual connections after each layer (add + LayerNorm)
-- Global readout: type-specific sum-pooling → concatenate → 2-layer MLP
+- Global readout: type-specific attentional pooling → concatenate → 2-layer MLP trunk
 - **3 prediction heads** (multi-task):
 
 | Head | Task | Loss |
 |------|------|------|
-| `affinity_head` | scalar pKd (regression) | Smooth-L1 |
-| `pose_head` | binary: RMSD < 2 Å (classification) | BCE |
-| `selectivity_head` | binary: EGFR vs ABL1 (classification) | BCE |
+| `affinity_head` | scalar pKd regression | Smooth-L1 |
+| `pose_head` | binary: RMSD < 2 Å | BCE |
+| `selectivity_head` | binary: EGFR vs ABL1 | BCE |
+
+### MTL vs STL results
+
+![Phase 2 results](checkpoints/phase2_results.png)
+
+*Fig 3. Test-set parity plots (n=15). a) MTL: RMSE=1.702, MAE=1.492. b) STL (affinity-only): RMSE=1.683, MAE=1.281. At n=150 the difference is within noise — STL shows marginally lower error on this split. MTL is expected to gain at larger dataset sizes where auxiliary supervision regularizes the shared encoder more effectively.*
 
 ### Why multi-task learning?
-
-Pose quality and selectivity act as auxiliary signals that share representations with the affinity prediction path. In practice (see Phase 2 results), MTL val RMSE = **1.924** vs STL **2.034** (Δ = 0.11, +5.4% improvement). The improvement is modest on 150 samples but expected to grow with larger datasets — the auxiliary heads regularize the shared encoder.
+Pose quality and selectivity act as auxiliary signals sharing representations with the affinity prediction path. At 150 samples the benefit is marginal (MTL RMSE 1.702 vs STL 1.683); the expected benefit emerges at 5000+ complexes where the auxiliary heads act as regularizers.
 
 **Uncertainty weighting (Kendall et al., 2018):** Each loss term is divided by a learned task variance σ² (log σ² is the actual parameter for numerical stability). This avoids manually tuning loss weights and lets the model adaptively balance tasks during training.
 
@@ -58,16 +73,23 @@ Pose quality and selectivity act as auxiliary signals that share representations
 
 ## 3. RL Molecular Generator
 
+![LSTM policy and REINFORCE loop](Figs/LSTM-model-arch.png)
+
+*Fig 4. REINFORCE training loop. SMILES corpus → character-level tokenizer → embedding → 2-layer LSTM policy → autoregressive token sampling → generated SMILES → 3D graph construction in reference pocket (6E9A) → frozen GNN oracle scores pKd → composite reward (affinity + QED + SA + MW) → REINFORCE gradient update. KL penalty against frozen prior (dashed) prevents mode collapse.*
+
 ### Why REINFORCE over PPO/GRPO?
-For small-molecule generation with sparse valid rewards (~1% validity from a random prior), REINFORCE with a moving EMA baseline is computationally lighter and easier to interpret. PPO would add a value-network head and clipping mechanics that provide marginal benefit at this scale. The key instability risk (mode collapse) is addressed via a KL-divergence penalty against the frozen prior.
+For small-molecule generation, REINFORCE with an EMA baseline is computationally lighter and easier to interpret. PPO adds a value-network head and clipping mechanics that provide marginal benefit at this scale. Mode collapse is addressed via the KL-divergence penalty against the frozen prior.
 
 ### Policy: Character-level LSTM
 - 2 layers, hidden dim 512, embedding dim 128
-- Token vocabulary: single characters + two-char tokens (Cl, Br, @@, =O, etc.) → 37 tokens
-- Pre-trained for 60 epochs on ~158 EGFR-relevant SMILES (corpus = training set ligands + 29 known EGFR inhibitors) using teacher forcing (cross-entropy loss → 0.156 final)
+- Token vocabulary: single characters + two-char tokens (Cl, Br, @@, ...) → 37 tokens
+- Pre-trained for 120 epochs on ~154 SMILES (PDBbind training ligands + 29 known EGFR inhibitors) using teacher-forcing cross-entropy
+
+### Critical implementation note — eval mode during sampling
+The LSTM must run in `eval()` mode during autoregressive generation. In `train()` mode, inter-layer dropout fires at every token step; compounded over 120 autoregressive steps this collapses SMILES validity to ~0%. Gradients flow through `log_p.gather()` regardless of train/eval state — REINFORCE backward is unaffected.
 
 ### Why character-level over fragment-based?
-Character-level is simpler, produces more diverse output, and doesn't require a fragment library. The trade-off is lower initial validity (~1% before RL fine-tuning, improving over training). Fragment-based generators (REINVENT 4, GraphINVENT) achieve higher validity but require curated fragment vocabularies.
+Character-level is simpler and produces more diverse output without requiring a curated fragment library. The trade-off is lower initial validity; fragment-based generators (REINVENT 4, GraphINVENT) achieve higher validity natively but are more complex to set up.
 
 ### Reward function
 ```
@@ -78,12 +100,18 @@ R = 0.5·r_affinity + 0.2·r_qed + 0.2·r_sa + 0.1·r_mw
 | `r_affinity` | Normalized GNN pKd — primary optimization target |
 | `r_qed` | Drug-likeness (Bickerton 2012) — composite Lipinski compliance |
 | `r_sa` | 1 − SA_score/10 — synthetic accessibility (Ertl & Schuffenhauer) |
-| `r_mw` | 1 if MW ≤ 500, otherwise 0 — hard Lipinski MW filter |
+| `r_mw` | 1 if MW ≤ 500, linear penalty above — hard Lipinski MW filter |
 
-Affinity weight (0.5) deliberately dominates to bias toward high-affinity molecules; QED and SA prevent the model from converging on synthetically inaccessible structures.
+Affinity weight (0.5) deliberately dominates to bias toward high-affinity molecules; QED and SA prevent convergence on synthetically inaccessible structures.
+
+### RL results
+
+![Phase 3 results](data/rl_results/phase3_results.png)
+
+*Fig 5. RL training summary (300 steps, batch 64, reference pocket 6E9A pKd=11.92). a) Reward dynamics — mean and max per step. b) Validity and KL penalty vs frozen prior. c) Top generated molecules: QED vs predicted pKd scatter (best pKd=7.56). d) Oracle pKd distribution over all valid molecules scored (n=110, median=7.46, max=7.60).*
 
 ### Oracle: frozen GNN as proxy scorer
-Generated SMILES → ETKDG 3D conformer → centroid alignment to reference pocket (6E9A, pKd = 11.92, highest in training set) → GNN predicts pKd. **Limitation acknowledged:** ETKDG + rigid centroid alignment is a coarse approximation of docking. A production system would call AutoDock Vina or Glide for the oracle. The GNN oracle is used here as a fast differentiable proxy consistent with the exercise scope.
+Generated SMILES → ETKDG 3D conformer → centroid alignment to reference pocket → GNN predicts pKd. **Limitation:** ETKDG + rigid centroid alignment is a coarse approximation of docking. A production system would call AutoDock Vina or FEP+ for scoring. The GNN oracle is used here as a fast differentiable proxy consistent with the exercise scope.
 
 ---
 
@@ -95,7 +123,7 @@ Five tables capture the full experimental lifecycle:
 |---|---|
 | `experiments` | Configuration registry (JSON blob) — one row per experimental condition |
 | `model_runs` | Per-epoch metrics from PyTorch Lightning training |
-| `binding_predictions` | On-demand predictions from the Streamlit UI |
+| `binding_predictions` | On-demand predictions from Streamlit UI |
 | `rl_molecules` | All generated molecules with per-component reward breakdown |
 | `vina_benchmarks` | GNN vs Vina correlation on held-out set |
 
@@ -120,14 +148,14 @@ streamlit ◄──────────────────────�
   (reads SQL Server directly; depends on service_healthy)
 ```
 
-`gnn-trainer` and `rl-agent` use `restart: "no"` — they are one-shot training jobs, not long-lived services. The dependency chain ensures RL only starts after the GNN checkpoint exists.
+`gnn-trainer` and `rl-agent` use `restart: "no"` — one-shot training jobs, not long-lived services. The dependency chain ensures RL only starts after the GNN checkpoint exists.
 
 ---
 
 ## 6. Limitations & Future Work
 
-1. **Dataset size (150 samples):** PDBbind refined set filtered to 150 for speed. Production training would use 5000+ complexes with cross-validation across protein families.
+1. **Dataset size (150 samples):** PDBbind refined set filtered to 150 for speed. Production training would use 5000+ complexes with cross-validation across protein families. MTL benefit over STL is expected to be more pronounced at that scale.
 2. **Oracle fidelity:** GNN oracle replaces proper docking. A production RL loop would call AutoDock Vina or FEP+ for scoring.
-3. **SMILES generator validity:** Character-level LSTM achieves ~1% validity from scratch. Fragment-based or graph-based generators (e.g., JT-VAE, GraphINVENT) would yield >30% validity natively.
+3. **SMILES generator validity:** Character-level LSTM achieves ~30% prior validity after training; fragment-based or graph-based generators (JT-VAE, GraphINVENT) yield higher validity natively.
 4. **Selectivity labels:** Binary EGFR/ABL1 selectivity head uses synthetic labels derived from known inhibitor annotations. Real selectivity data would require paired kinase assay results.
 5. **No 3D equivariance:** HGTConv is not SE(3)-equivariant. Switching to DimeNet++ or EGNN would improve geometric fidelity for affinity prediction.
