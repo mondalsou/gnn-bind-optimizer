@@ -13,8 +13,11 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 
 
-def _tb_scalars(log_dir: Path, tag: str):
-    """Return list of (step, value) from a TensorBoard events file."""
+def _tb_scalars(log_dir: Path, tag: str, renumber=False):
+    """Return list of (epoch, value) from a TensorBoard events file.
+
+    renumber=True: re-index steps 0,1,2,... regardless of global step value.
+    """
     try:
         from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
         files = sorted(log_dir.glob("events.out.tfevents.*"))
@@ -24,7 +27,10 @@ def _tb_scalars(log_dir: Path, tag: str):
         ea.Reload()
         if tag not in ea.Tags().get("scalars", []):
             return []
-        return [(e.step, e.value) for e in ea.Scalars(tag)]
+        raw = [(e.step, e.value) for e in ea.Scalars(tag)]
+        if renumber:
+            raw = [(i, v) for i, (_, v) in enumerate(raw)]
+        return raw
     except Exception:
         return []
 
@@ -50,11 +56,32 @@ def log_gnn_runs(mlflow, ckpt_dir: Path, log_dir: Path):
         elif not is_mtl and (stl_best is None or rmse < stl_best[1]):
             stl_best = (ep, rmse, f.name)
 
+    def _log_curves(mlflow, tb_ver: Path):
+        for tag, key in [
+            ("val/rmse",      "val_rmse"),
+            ("val/pearson",   "val_pearson_r"),
+            ("val/pose_auc",  "val_auc_pose"),
+            ("val/loss",      "val_loss"),
+        ]:
+            for epoch, val in _tb_scalars(tb_ver, tag, renumber=True):
+                mlflow.log_metric(key, val, step=epoch)
+        # train loss logged per batch — downsample to ~1 per epoch by unique epoch tag
+        train_loss = _tb_scalars(tb_ver, "train/loss", renumber=False)
+        epoch_tag  = _tb_scalars(tb_ver, "epoch", renumber=False)
+        if train_loss and epoch_tag:
+            # epoch_tag: (step, epoch_num) — use to bucket train_loss steps
+            step_to_epoch = {s: int(v) for s, v in epoch_tag}
+            seen = set()
+            for step, val in train_loss:
+                ep_num = step_to_epoch.get(step)
+                if ep_num is not None and ep_num not in seen:
+                    mlflow.log_metric("train_loss", val, step=ep_num)
+                    seen.add(ep_num)
+        return len(_tb_scalars(tb_ver, "val/rmse"))
+
     if mtl_best:
         ep, rmse, fname = mtl_best
-        tb_ver = log_dir / "version_1"  # MTL run
-        rmse_curve  = _tb_scalars(tb_ver, "val/rmse")
-        pearson_curve = _tb_scalars(tb_ver, "val/pearson")
+        tb_ver = log_dir / "version_1"
         with mlflow.start_run(run_name="gnn_mtl_baseline"):
             mlflow.log_params({
                 "model": "HeteroGNN",
@@ -71,18 +98,12 @@ def log_gnn_runs(mlflow, ckpt_dir: Path, log_dir: Path):
                 "val_auc_pose": 0.778,
                 "epoch": ep,
             })
-            for step, val in rmse_curve:
-                mlflow.log_metric("val_rmse_epoch", val, step=step)
-            for step, val in pearson_curve:
-                mlflow.log_metric("val_pearson_epoch", val, step=step)
-            n_curves = len(rmse_curve)
-        print(f"  ✓ MTL  epoch={ep}  val_rmse={rmse}  convergence_steps={n_curves}")
+            n = _log_curves(mlflow, tb_ver)
+        print(f"  ✓ MTL  epoch={ep}  val_rmse={rmse}  epochs_logged={n}")
 
     if stl_best:
         ep, rmse, fname = stl_best
-        tb_ver = log_dir / "version_6"  # STL run
-        rmse_curve    = _tb_scalars(tb_ver, "val/rmse")
-        pearson_curve = _tb_scalars(tb_ver, "val/pearson")
+        tb_ver = log_dir / "version_6"
         with mlflow.start_run(run_name="gnn_stl_ablation"):
             mlflow.log_params({
                 "model": "HeteroGNN",
@@ -98,12 +119,8 @@ def log_gnn_runs(mlflow, ckpt_dir: Path, log_dir: Path):
                 "val_pearson_r": 0.489,
                 "epoch": ep,
             })
-            for step, val in rmse_curve:
-                mlflow.log_metric("val_rmse_epoch", val, step=step)
-            for step, val in pearson_curve:
-                mlflow.log_metric("val_pearson_epoch", val, step=step)
-            n_curves = len(rmse_curve)
-        print(f"  ✓ STL  epoch={ep}  val_rmse={rmse}  convergence_steps={n_curves}")
+            n = _log_curves(mlflow, tb_ver)
+        print(f"  ✓ STL  epoch={ep}  val_rmse={rmse}  epochs_logged={n}")
 
 
 def log_rl_run(mlflow, rl_path: Path):

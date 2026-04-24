@@ -1,8 +1,8 @@
 # GNNBindOptimizer
 
-Heterogeneous GNN for protein-ligand binding affinity prediction + REINFORCE-based molecular generator, with SQL Server persistence and Streamlit UI.
+Heterogeneous GNN for protein-ligand binding affinity prediction + REINFORCE-based molecular generator, with SQL Server persistence, MLflow experiment tracking, and Streamlit UI.
 
-Built as a take-home SBDD exercise. Target: EGFR kinase (PDB 1IEP / PDBbind refined set).
+Built as a take-home SBDD exercise. Target: EGFR kinase (PDB 1IEP / PDBbind refined set, pocket 6E9A).
 
 ---
 
@@ -13,17 +13,30 @@ Built as a take-home SBDD exercise. Target: EGFR kinase (PDB 1IEP / PDBbind refi
 git clone <repo-url> GNNBindOptimizer
 cd GNNBindOptimizer
 
-# 2. Copy env file and set password (or use defaults)
+# 2. Copy env file
 cp .env.example .env
 
 # 3. Cold start — builds images, trains GNN, runs RL, starts UI
 docker compose up --build
 
-# UI: http://localhost:8501
+# UI:     http://localhost:8501
 # MLflow: http://localhost:5000
 ```
 
-> **Apple Silicon / CPU-only:** Training runs on CPU (HGTConv scatter_reduce is not supported on MPS). Full pipeline takes ~10 min on a modern laptop.
+> **Apple Silicon / CPU-only:** Training runs on CPU (HGTConv scatter_reduce not supported on MPS). Full pipeline ~10 min on a modern laptop.
+
+### Dry-run (pre-trained checkpoints, skip training)
+
+```bash
+# Start only SQL Server + MLflow + Streamlit
+docker compose up -d sqlserver mlflow streamlit
+
+# Populate MLflow with existing checkpoint metrics + convergence curves
+python scripts/log_existing_runs.py
+
+# UI:     http://localhost:8501
+# MLflow: http://localhost:5000  (3 runs: MTL, STL, RL)
+```
 
 ---
 
@@ -33,27 +46,27 @@ docker compose up --build
 # Python 3.11 recommended
 pip install -r requirements.txt
 
-# Install PyG CPU wheels (auto-detects torch version)
+# Install PyG CPU wheels
 TORCH=$(python -c "import torch; print(torch.__version__.split('+')[0])")
 pip install torch-scatter torch-sparse torch-cluster torch-geometric \
     -f https://data.pyg.org/whl/torch-${TORCH}+cpu.html
 
 # Phase 1 — data pipeline + graph construction
 jupyter nbconvert --to notebook --execute --inplace \
-    notebooks/phase1_data_graph_pipeline.ipynb \
+    notebooks/01_data_graph_pipeline.ipynb \
     --ExecutePreprocessor.timeout=3600
 
 # Phase 2 — GNN training + MTL ablation
 jupyter nbconvert --to notebook --execute --inplace \
-    notebooks/phase2_gnn_model.ipynb \
+    notebooks/02_gnn_model.ipynb \
     --ExecutePreprocessor.timeout=3600
 
 # Phase 3 — RL molecular generator
 jupyter nbconvert --to notebook --execute --inplace \
-    notebooks/phase3_rl_generator.ipynb \
+    notebooks/03_rl_generator.ipynb \
     --ExecutePreprocessor.timeout=600
 
-# Streamlit UI (local, no SQL Server required — falls back to demo data)
+# Streamlit UI (local, no SQL Server — falls back to demo data)
 streamlit run app/streamlit_app.py
 ```
 
@@ -64,34 +77,34 @@ streamlit run app/streamlit_app.py
 ```
 GNNBindOptimizer/
 ├── notebooks/
-│   ├── phase1_data_graph_pipeline.ipynb   # PDB → HeteroData graphs
-│   ├── phase2_gnn_model.ipynb             # HeteroGNN training + MTL ablation
-│   └── phase3_rl_generator.ipynb         # REINFORCE molecular generator
+│   ├── 01_data_graph_pipeline.ipynb   # PDB → HeteroData graphs
+│   ├── 02_gnn_model.ipynb             # HeteroGNN training + MTL ablation
+│   └── 03_rl_generator.ipynb          # REINFORCE molecular generator
 ├── src/
 │   ├── graph/          # Graph construction utilities
-│   ├── models/         # HeteroGNN + prediction heads
-│   │   └── gnn_state.pt                  # Exported weights + test metrics
 │   ├── rl/             # SMILESTokenizer, SMILESPolicy, load_policy()
 │   └── db/             # SQLAlchemy connection helper
 ├── app/
-│   └── streamlit_app.py                  # 5-page UI
+│   └── streamlit_app.py               # 5-page Streamlit UI
 ├── db/
-│   ├── init.sql                          # SQL Server schema + seed data
-│   └── queries.sql                       # 7 example analytical queries
+│   ├── init.sql                       # SQL Server schema + seed data
+│   └── queries.sql                    # Analytical SQL examples
+├── scripts/
+│   └── log_existing_runs.py           # Backfill MLflow from checkpoints + TensorBoard logs
 ├── docker/
 │   ├── Dockerfile.trainer
 │   ├── Dockerfile.rl
 │   ├── Dockerfile.streamlit
 │   ├── Dockerfile.mlflow
 │   └── entrypoint-sqlserver.sh
-├── checkpoints/                          # GNN + RL policy checkpoints
+├── checkpoints/                       # GNN Lightning checkpoints (MTL + STL)
 ├── data/
-│   ├── processed/dataset.pt              # 150 HeteroData graphs
-│   └── rl_results/rl_results.json        # Generated molecules + rewards
+│   ├── processed/dataset.pt           # 150 HeteroData graphs
+│   └── rl_results/rl_results.json     # Generated molecules + rewards
 ├── docker-compose.yml
 ├── requirements.txt
 ├── .env.example
-├── ARCHITECTURE.md                       # Design decisions + rationale
+├── ARCHITECTURE.md
 └── README.md
 ```
 
@@ -109,16 +122,17 @@ GNNBindOptimizer/
 
 MTL improves val RMSE by 5.4% (Δ = 0.11) via Kendall uncertainty-weighted multi-task loss.
 
-### Phase 3 — RL Generator (300 steps × 32 mols)
+### Phase 3 — RL Generator (300 steps × 64 mols, pocket 6E9A)
 
 | Metric | Value |
 |--------|-------|
-| Valid molecules collected | 66 |
-| Best reward | 0.709 |
-| Best predicted pKd | 7.58 |
-| Best mol | `NS(=O)(=O)c1ccc(C(=O)N2CCC(O)(c3ccccc3)CC2)cc1` |
+| Total molecules generated | 9,151 |
+| Top molecules saved | 18 |
+| Best reward | 0.731 |
+| Best predicted pKd | 7.61 |
+| Best mol | `O=C(Nc1ccccc1)c1cccc(C(F)(F)F)c1` |
 
-Top molecules are sulfonamide scaffolds with drug-like properties (QED > 0.8, SA > 0.79, MW < 500).
+Top molecules are sulfonamide and amide scaffolds with drug-like properties (QED > 0.8, SA > 0.79, MW < 500).
 
 ---
 
@@ -126,24 +140,46 @@ Top molecules are sulfonamide scaffolds with drug-like properties (QED > 0.8, SA
 
 | Page | Description |
 |------|-------------|
-| Dashboard | Experiment table + MTL vs STL bar chart |
-| Binding Predictor | Input SMILES → GNN pKd + pose + selectivity |
-| RL Browser | Table + scatter + 2D structures of generated mols |
-| GNN vs Vina | Parity plot on benchmark set |
+| Summary | KPI cards, phase timeline, MTL vs STL bar chart, RL reward curve |
+| Binding Predictor | Input SMILES → GNN pKd + pose prob + selectivity |
+| RL Generator | Top 18 generated molecules — structure, pKd, QED, reward |
+| GNN vs Vina | Parity plot + table: GNN predictions vs Vina benchmark on RL top-20 |
 | SQL Console | Raw SELECT query → rendered table + CSV download |
+
+Header badge shows live pocket and best pKd from `rl_results.json`.
+
+---
+
+## MLflow Experiment Tracking
+
+MLflow runs against SQL Server (`mlflowdb` database). Three pre-logged runs in experiment **GNNBindOptimizer**:
+
+| Run | Key metrics |
+|-----|-------------|
+| `gnn_mtl_baseline` | val_rmse=1.924, Pearson r=0.541, Pose AUC=0.778 — 30-epoch convergence curve |
+| `gnn_stl_ablation` | val_rmse=2.034, Pearson r=0.489 — 17-epoch convergence curve |
+| `rl_reinforce_egfr` | best_pkd=7.61, best_reward=0.731, validity=100% — reward curve (mean + max per step) |
+
+To backfill MLflow from existing checkpoints + TensorBoard logs:
+```bash
+python scripts/log_existing_runs.py [--tracking-uri http://localhost:5000]
+```
 
 ---
 
 ## SQL Server Schema
 
-See `db/init.sql` for full DDL. `db/queries.sql` contains 7 analytical queries covering:
-- Best RL molecule per experiment
-- MTL vs STL ablation comparison
-- RL reward trajectory (10-step moving average)
-- Drug-likeness distribution (QED/SA buckets)
-- GNN vs Vina parity
-- Top binding predictions across all runs
-- Pareto-front molecules (high affinity + high drug-likeness)
+See `db/init.sql` for full DDL. Five tables:
+
+| Table | Purpose |
+|-------|---------|
+| `experiments` | Config registry (JSON blob) |
+| `model_runs` | Per-epoch training metrics |
+| `binding_predictions` | On-demand Streamlit predictions |
+| `rl_molecules` | Generated molecules + reward breakdown |
+| `vina_benchmarks` | GNN vs Vina correlation |
+
+MLflow uses a separate `mlflowdb` database to avoid schema conflicts with `dbo.experiments`.
 
 ---
 
@@ -156,3 +192,4 @@ See `ARCHITECTURE.md` for full rationale on:
 - REINFORCE vs PPO for molecular generation
 - Character-level LSTM vs fragment-based generators
 - Oracle approximation (ETKDG + centroid alignment vs full docking)
+- MLflow + SQL Server backend topology
