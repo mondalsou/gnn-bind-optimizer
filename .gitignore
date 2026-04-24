@@ -37,6 +37,7 @@ env/
 ENV/
 .python-version
 PLAN.md
+AGENTS.md
 
 # Notebook checkpoints
 .ipynb_checkpoints/
