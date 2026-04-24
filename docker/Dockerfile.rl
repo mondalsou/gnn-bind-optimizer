@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 RUN pip install --no-cache-dir \
     torch-scatter torch-sparse torch-cluster torch-geometric \
-    -f https://data.pyg.org/whl/torch-$(python -c "import torch; print(torch.__version__.split('+')[0])")+cpu.html
+    -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
 
 COPY src/ /workspace/src/
 COPY notebooks/ /workspace/notebooks/

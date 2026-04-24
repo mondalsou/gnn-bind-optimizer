@@ -7,20 +7,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unixodbc-dev curl gnupg \
     && curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor \
        -o /usr/share/keyrings/microsoft-prod.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/microsoft-prod.gpg] \
        https://packages.microsoft.com/debian/12/prod bookworm main" \
        > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir streamlit pyodbc sqlalchemy
-
+# Streamlit runtime deps only — skip biopython/preprocessing-only packages
 RUN pip install --no-cache-dir \
-    torch-scatter torch-sparse torch-cluster torch-geometric \
-    -f https://data.pyg.org/whl/torch-$(python -c "import torch; print(torch.__version__.split('+')[0])")+cpu.html
+    streamlit==1.35.0 \
+    torch==2.2.0 \
+    pytorch-lightning==2.2.0 \
+    rdkit==2024.3.1 \
+    numpy==1.26.4 \
+    pandas==2.2.2 \
+    scipy==1.12.0 \
+    altair==5.3.0 \
+    pyodbc \
+    sqlalchemy
+
+RUN pip install --no-cache-dir torch-geometric==2.5.2
 
 COPY src/ /workspace/src/
 COPY app/ /workspace/app/

@@ -5,6 +5,11 @@ IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'gnnbind')
     CREATE DATABASE gnnbind;
 GO
 
+-- Separate database for MLflow tracking (avoids conflict with our experiments table)
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'mlflowdb')
+    CREATE DATABASE mlflowdb;
+GO
+
 USE gnnbind;
 GO
 
