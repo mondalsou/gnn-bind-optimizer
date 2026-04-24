@@ -36,6 +36,7 @@ venv/
 env/
 ENV/
 .python-version
+PLAN.md
 
 # Notebook checkpoints
 .ipynb_checkpoints/

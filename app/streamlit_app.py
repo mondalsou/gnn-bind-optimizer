@@ -33,7 +33,22 @@ html, body, [class*="css"] {
     border-right: 1px solid rgba(255,255,255,0.06) !important;
 }
 [data-testid="stSidebar"] * { color: #edf7f5 !important; }
-[data-testid="stSidebar"] .stRadio label { color: #edf7f5 !important; }
+[data-testid="stSidebar"] .stRadio label {
+    color: #edf7f5 !important;
+    font-size: 1.1rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    padding: 0.25rem 0 !important;
+}
+[data-testid="stSidebar"] .stRadio [data-testid="stWidgetLabel"] {
+    font-size: 1.1rem !important;
+}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {
+    font-size: 1.1rem !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
     color: rgba(237,247,245,0.5) !important;
     font-size: 0.7rem !important;
@@ -587,7 +602,7 @@ def _build_graph(smiles, pocket_id: str = "6e9a"):
     return g
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60)
 def _rl_df() -> pd.DataFrame:
     p = Path(__file__).parent.parent / "data" / "rl_results" / "rl_results.json"
     if not p.exists(): return pd.DataFrame()
@@ -600,7 +615,7 @@ def _rl_df() -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=60)
 def _rl_summary() -> dict:
     """Returns summary stats from rl_results.json (full-run counts, not just top_molecules)."""
     p = Path(__file__).parent.parent / "data" / "rl_results" / "rl_results.json"
@@ -1055,14 +1070,15 @@ elif page == "RL Generator":
     """, unsafe_allow_html=True)
 
     # ── Data ──────────────────────────────────────────────────────────────────
-    df = _db_query("""
-        SELECT smiles, reward, r_affinity, r_qed, r_sa, r_mw, pred_pkd, step
-        FROM dbo.rl_molecules
-        WHERE experiment_id=(SELECT id FROM dbo.experiments WHERE name='rl_reinforce_egfr')
-        ORDER BY reward DESC
-    """)
+    # Prefer JSON (live run results) over SQL seed data
+    df = _rl_df()
     if df.empty:
-        df = _rl_df()
+        df = _db_query("""
+            SELECT smiles, reward, r_affinity, r_qed, r_sa, r_mw, pred_pkd, step
+            FROM dbo.rl_molecules
+            WHERE experiment_id=(SELECT id FROM dbo.experiments WHERE name='rl_reinforce_egfr')
+            ORDER BY reward DESC
+        """)
     if "reward_total" in df.columns and "reward" not in df.columns:
         df = df.rename(columns={"reward_total":"reward"})
 

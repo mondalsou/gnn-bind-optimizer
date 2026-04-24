@@ -2,7 +2,9 @@
 
 Heterogeneous GNN for protein-ligand binding affinity prediction + REINFORCE-based molecular generator, with SQL Server persistence, MLflow experiment tracking, and Streamlit UI.
 
-Built as a take-home SBDD exercise. Target: EGFR kinase (PDB 1IEP / PDBbind refined set, pocket 6E9A).
+![Overview](Figs/Overview.png)
+
+*Fig 1. Overview of the pipeline.*
 
 ---
 
@@ -112,7 +114,7 @@ GNNBindOptimizer/
 
 ## Results Summary
 
-### Phase 2 — GNN Training (150 PDBbind complexes)
+### GNN Training (150 PDBbind complexes)
 
 | Model | val RMSE | Pearson r | Pose AUC |
 |-------|----------|-----------|----------|
@@ -122,17 +124,17 @@ GNNBindOptimizer/
 
 MTL improves val RMSE by 5.4% (Δ = 0.11) via Kendall uncertainty-weighted multi-task loss.
 
-### Phase 3 — RL Generator (300 steps × 64 mols, pocket 6E9A)
+### RL Generator (150 steps × 64 mols, pocket 6E9A)
 
 | Metric | Value |
 |--------|-------|
-| Total molecules generated | 9,151 |
+| Total molecules generated | 147 |
 | Top molecules saved | 18 |
-| Best reward | 0.731 |
-| Best predicted pKd | 7.61 |
-| Best mol | `O=C(Nc1ccccc1)c1cccc(C(F)(F)F)c1` |
+| Best reward | 0.720 |
+| Best predicted pKd | 7.57 |
+| Best mol | `Cc1ccc(C(=O)NCCCCCCC(=O)N=O)cc1` |
 
-Top molecules are sulfonamide and amide scaffolds with drug-like properties (QED > 0.8, SA > 0.79, MW < 500).
+Top molecules are amide scaffolds with drug-like properties (SA > 0.79, MW < 500). Prior trained for 60 epochs.
 
 ---
 
@@ -158,7 +160,7 @@ MLflow runs against SQL Server (`mlflowdb` database). Three pre-logged runs in e
 |-----|-------------|
 | `gnn_mtl_baseline` | val_rmse=1.924, Pearson r=0.541, Pose AUC=0.778 — 30-epoch convergence curve |
 | `gnn_stl_ablation` | val_rmse=2.034, Pearson r=0.489 — 17-epoch convergence curve |
-| `rl_reinforce_egfr` | best_pkd=7.61, best_reward=0.731, validity=100% — reward curve (mean + max per step) |
+| `rl_reinforce_egfr` | best_pkd=7.57, best_reward=0.720, validity=100% — reward curve (mean + max per step) |
 
 To backfill MLflow from existing checkpoints + TensorBoard logs:
 ```bash

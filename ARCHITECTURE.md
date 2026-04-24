@@ -10,7 +10,7 @@ PDBbind v2020 refined set, filtered to 150 protein–ligand complexes with measu
 *Fig 1. Dataset statistics (n=150). a) pKd distribution — mean 6.4, range 2.0–11.9. b) Ligand molecular weight — mean 380 Da, majority below 500 (Lipinski compliant). c) Pocket residue count — mean 27, range 9–43. d) Protein–ligand interaction edge count per complex — mean 27, long tail to 94.*
 
 ### Why a heterogeneous graph?
-Protein-ligand binding involves two chemically distinct entity types (amino acid residues and small-molecule atoms) with fundamentally different feature spaces. A homogeneous GNN would require padding both to the same dimensionality, discarding the structural distinction. A heterogeneous graph (`torch_geometric.data.HeteroData`) preserves it natively and lets message-passing attend separately to intra-ligand, intra-pocket, and cross-interface edges.
+Protein-ligand binding involves two chemically distinct entity types (amino acid residues and small-molecule atoms) with fundamentally different feature spaces. A homogeneous GNN would require padding both to the same dimensionality, discarding the structural distinction. A heterogeneous graph preserves it natively and lets message-passing attend separately to intra-ligand, intra-pocket, and cross-interface edges.
 
 ### Node features
 | Node type | Dim | Key features |
@@ -60,7 +60,7 @@ HGT uses type-specific attention heads and relation-specific key-query-value pro
 
 ### MTL vs STL results
 
-![Phase 2 results](checkpoints/phase2_results.png)
+![Part 2 results](checkpoints/phase2_results.png)
 
 *Fig 3. Test-set parity plots (n=15). a) MTL: RMSE=1.702, MAE=1.492. b) STL (affinity-only): RMSE=1.683, MAE=1.281. At n=150 the difference is within noise — STL shows marginally lower error on this split. MTL is expected to gain at larger dataset sizes where auxiliary supervision regularizes the shared encoder more effectively.*
 
@@ -106,18 +106,20 @@ Affinity weight (0.5) deliberately dominates to bias toward high-affinity molecu
 
 ### RL results
 
-![Phase 3 results](data/rl_results/phase3_results.png)
+![Part 3 results](data/rl_results/phase3_results.png)
 
-*Fig 5. RL training summary (300 steps, batch 64, reference pocket 6E9A pKd=11.92). a) Reward dynamics — mean and max per step. b) Validity and KL penalty vs frozen prior. c) Top generated molecules: QED vs predicted pKd scatter (best pKd=7.61). d) Oracle pKd distribution over all valid molecules scored (n=9,151 total, 18 top saved).*
+*Fig 5. RL training summary (150 steps, batch 64, prior 60 epochs, reference pocket 6E9A pKd=11.92). a) Reward dynamics — mean and max per step. b) Validity and KL penalty vs frozen prior. c) Top generated molecules: QED vs predicted pKd scatter (best pKd=7.57). d) Oracle pKd distribution over all valid molecules scored (n=147 total, 18 top saved).*
 
 **Summary (from `data/rl_results/rl_results.json`):**
 
 | Metric | Value |
 |--------|-------|
-| Total generated | 9,151 |
-| Best reward | 0.731 |
-| Best predicted pKd | 7.61 |
-| Mean reward (final step) | 0.145 |
+| Total generated | 147 |
+| Top molecules saved | 18 |
+| Best reward | 0.720 |
+| Best predicted pKd | 7.57 |
+| Prior epochs | 60 |
+| RL steps | 150 × 64 batch |
 
 ### Oracle: frozen GNN as proxy scorer
 Generated SMILES → ETKDG 3D conformer → centroid alignment to reference pocket → GNN predicts pKd. **Limitation:** ETKDG + rigid centroid alignment is a coarse approximation of docking. A production system would call AutoDock Vina or FEP+ for scoring. The GNN oracle is used here as a fast differentiable proxy consistent with the exercise scope.
@@ -146,22 +148,13 @@ Five tables capture the full experimental lifecycle:
 
 ## 5. Docker Compose Service Topology
 
-### Full pipeline (cold start)
+### Full pipeline
 
-```
-sqlserver ──────────────────────────────────────────────────┐
-    │ (service_healthy)                                      │
-    ▼                                                        │
-mlflow          gnn-trainer (runs once, exits)              │
-                    │ (service_completed_successfully)       │
-                    ▼                                        │
-               rl-agent (runs once, exits)                   │
-                                                            │
-streamlit ◄─────────────────────────────────────────────────┘
-  (reads SQL Server directly; depends on service_healthy)
-```
 
-`gnn-trainer` and `rl-agent` use `restart: "no"` — one-shot training jobs, not long-lived services. Dependency chain ensures RL starts only after GNN checkpoint exists.
+![Overview](Figs/Overview.png)
+
+*Fig. Overview of the pipeline.*
+
 
 ### Dry-run (pre-trained checkpoints)
 

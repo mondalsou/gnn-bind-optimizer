@@ -4,6 +4,7 @@ WORKDIR /workspace
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 libxext6 libgomp1 git wget \
+    gcc g++ python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -20,6 +21,6 @@ COPY data/ /workspace/data/
 
 ENV PYTHONPATH=/workspace
 CMD ["jupyter", "nbconvert", "--to", "notebook", "--execute", "--inplace", \
-     "notebooks/phase1_data_graph_pipeline.ipynb", \
-     "notebooks/phase2_gnn_model.ipynb", \
+     "notebooks/01_data_graph_pipeline.ipynb", \
+     "notebooks/02_gnn_model.ipynb", \
      "--ExecutePreprocessor.timeout=3600"]
