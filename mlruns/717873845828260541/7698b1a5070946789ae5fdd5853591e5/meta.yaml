@@ -1,0 +1,14 @@
+artifact_uri: /Users/sourav/personal-github/gnn-bind-optimizer/mlruns/717873845828260541/7698b1a5070946789ae5fdd5853591e5/artifacts
+end_time: 1777093610056
+entry_point_name: ''
+experiment_id: '717873845828260541'
+lifecycle_stage: active
+run_id: 7698b1a5070946789ae5fdd5853591e5
+run_name: smoke_local
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1777093610048
+status: 3
+tags: []
+user_id: sourav

@@ -423,6 +423,222 @@ def mol_svg_html(smiles: str, prev_smiles: str | None = None) -> str:
     return f'<div class="mol-panel"><div class="mol-fallback">{smiles}</div></div>'
 
 
+@st.cache_data(show_spinner=False)
+def _pocket_svg(pdb_id: str) -> str:
+    """
+    Generate a unique SVG ribbon from actual Cα coordinates via PCA → 2D.
+    Returns an <svg> string to embed directly in the dark viewport.
+    """
+    import numpy as np
+    from sklearn.decomposition import PCA
+
+    pockets = _load_all_pockets()
+    g = pockets.get(pdb_id.lower())
+    if g is None:
+        return ""
+
+    pos = g["residue"].pos.numpy()          # [N, 3]
+    lig_centroid = g["ligand"].pos.numpy().mean(axis=0)
+
+    # Project to 2D, centre and scale to fit 500×400 viewBox
+    pca   = PCA(n_components=2)
+    pos2d = pca.fit_transform(pos)
+    c2d   = pca.transform(lig_centroid.reshape(1, -1))[0]
+
+    def _scale(pts, cx, cy, W=500, H=400, pad=60):
+        mn, mx = pts.min(axis=0), pts.max(axis=0)
+        span = (mx - mn).clip(min=1e-6)
+        s = min((W - 2*pad) / span[0], (H - 2*pad) / span[1])
+        return (pts - mn) * s + np.array([cx - (mx-mn)[0]*s/2,
+                                           cy - (mx-mn)[1]*s/2])
+
+    W, H = 500, 400
+    pts  = _scale(pos2d,  W/2, H/2)
+    lig  = _scale(c2d.reshape(1,-1), W/2, H/2)[0]
+
+    # Smooth catmull-rom → cubic bezier path through Cα backbone
+    def _catmull_to_bezier(pts):
+        """Convert ordered Cα positions to SVG cubic bezier path string."""
+        if len(pts) < 2:
+            return ""
+        segs = [f"M {pts[0,0]:.1f},{pts[0,1]:.1f}"]
+        for i in range(len(pts) - 1):
+            p0 = pts[max(0, i-1)]
+            p1 = pts[i]
+            p2 = pts[min(len(pts)-1, i+1)]
+            p3 = pts[min(len(pts)-1, i+2)]
+            # control points (catmull-rom tension=0.5)
+            cp1x = p1[0] + (p2[0] - p0[0]) / 6
+            cp1y = p1[1] + (p2[1] - p0[1]) / 6
+            cp2x = p2[0] - (p3[0] - p1[0]) / 6
+            cp2y = p2[1] - (p3[1] - p1[1]) / 6
+            segs.append(f"C {cp1x:.1f},{cp1y:.1f} {cp2x:.1f},{cp2y:.1f} {p2[0]:.1f},{p2[1]:.1f}")
+        return " ".join(segs)
+
+    backbone = _catmull_to_bezier(pts)
+
+    # Beta-sheet arrows: sample every ~8 residues
+    arrows = []
+    step = max(3, len(pts) // 10)
+    for i in range(0, len(pts) - step, step):
+        p1, p2 = pts[i], pts[i + step]
+        dx, dy = p2[0]-p1[0], p2[1]-p1[1]
+        length = (dx**2 + dy**2)**0.5 + 1e-6
+        nx, ny = -dy/length * 8, dx/length * 8   # normal
+        # arrowhead polygon: base left, base right, tip
+        bx, by = p1[0] + dx*0.3, p1[1] + dy*0.3
+        tx, ty = p1[0] + dx*0.85, p1[1] + dy*0.85
+        pts_arrow = (
+            f"{bx+nx:.1f},{by+ny:.1f} "
+            f"{bx-nx:.1f},{by-ny:.1f} "
+            f"{tx:.1f},{ty:.1f}"
+        )
+        arrows.append(f'<polygon points="{pts_arrow}" fill="#14b8a6" fill-opacity="0.75"/>')
+
+    arrows_svg = "\n".join(arrows)
+
+    # Ligand CPK at binding centroid
+    lx, ly = float(lig[0]), float(lig[1])
+
+    svg = f"""<svg viewBox="0 0 {W} {H}" style="width:100%;height:100%;filter:drop-shadow(0 0 14px rgba(15,118,110,0.45))">
+  <defs>
+    <radialGradient id="gC" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#fff"/><stop offset="100%" stop-color="#888"/>
+    </radialGradient>
+    <radialGradient id="gN2" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#1d4ed8"/>
+    </radialGradient>
+    <radialGradient id="gO2" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#f87171"/><stop offset="100%" stop-color="#991b1b"/>
+    </radialGradient>
+    <linearGradient id="gR2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="50%" stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#115e59"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Backbone trace (unique per pocket) -->
+  <path d="{backbone}" fill="none" stroke="url(#gR2)" stroke-width="20"
+        stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" opacity="0.8"/>
+  <!-- Thin inner highlight -->
+  <path d="{backbone}" fill="none" stroke="rgba(110,231,183,0.4)" stroke-width="5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Beta-sheet arrows -->
+  {arrows_svg}
+
+  <!-- Ligand glow -->
+  <circle cx="{lx:.1f}" cy="{ly:.1f}" r="36" fill="rgba(255,255,255,0.1)" filter="url(#glow)"/>
+
+  <!-- CPK ligand atoms -->
+  <line x1="{lx-22:.1f}" y1="{ly:.1f}" x2="{lx:.1f}" y2="{ly:.1f}" stroke="#888" stroke-width="9" stroke-linecap="round"/>
+  <line x1="{lx:.1f}" y1="{ly:.1f}" x2="{lx+16:.1f}" y2="{ly-18:.1f}" stroke="#888" stroke-width="9" stroke-linecap="round"/>
+  <line x1="{lx:.1f}" y1="{ly:.1f}" x2="{lx+22:.1f}" y2="{ly+14:.1f}" stroke="#888" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="{lx-22:.1f}" cy="{ly:.1f}" r="14" fill="url(#gO2)"/>
+  <circle cx="{lx:.1f}" cy="{ly:.1f}" r="16" fill="url(#gC)"/>
+  <circle cx="{lx+16:.1f}" cy="{ly-18:.1f}" r="12" fill="url(#gN2)"/>
+  <circle cx="{lx+22:.1f}" cy="{ly+14:.1f}" r="12" fill="url(#gN2)"/>
+</svg>"""
+
+    return svg
+
+
+@st.cache_data(show_spinner=False)
+def _pocket_viz(pdb_id: str):
+    """
+    2D PCA projection of pocket Cα atoms.
+    Returns (png_bytes, stats_dict) — cached per pocket.
+    """
+    import io, numpy as np, matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+
+    pockets = _load_all_pockets()
+    g = pockets.get(pdb_id.lower())
+    if g is None:
+        return None, {}
+
+    pos        = g["residue"].pos.numpy()          # [N, 3]
+    n_res      = len(pos)
+    edge_index = g["residue", "contact", "residue"].edge_index.numpy()
+    n_contacts = edge_index.shape[1] // 2
+
+    # 2D PCA projection
+    pca   = PCA(n_components=2)
+    pos2d = pca.fit_transform(pos)                 # [N, 2]
+
+    # Depth along the third PC for colour
+    pca3     = PCA(n_components=3)
+    pos3d    = pca3.fit_transform(pos)
+    depth    = pos3d[:, 2]
+    d_norm   = (depth - depth.min()) / (depth.ptp() + 1e-8)
+
+    # Ligand centroid projected to same 2D space
+    lig_pos    = g["ligand"].pos.numpy()
+    centroid   = lig_pos.mean(axis=0, keepdims=True)
+    c2d        = pca.transform(centroid)[0]
+
+    # Mean contact edge length (Å)
+    edge_dists = []
+    for k in range(0, edge_index.shape[1], 2):
+        s, d = edge_index[0, k], edge_index[1, k]
+        edge_dists.append(np.linalg.norm(pos[s] - pos[d]))
+    mean_edge = float(np.mean(edge_dists)) if edge_dists else 0.0
+
+    fig, ax = plt.subplots(figsize=(5.2, 4.2), facecolor="#fbfcfe")
+    ax.set_facecolor("#f0f4f8")
+
+    # Contact edges — draw only every other to keep it readable
+    for k in range(0, edge_index.shape[1], 2):
+        s, d = edge_index[0, k], edge_index[1, k]
+        ax.plot([pos2d[s, 0], pos2d[d, 0]],
+                [pos2d[s, 1], pos2d[d, 1]],
+                color="#a8c0c0", lw=0.55, alpha=0.35, zorder=1)
+
+    # Residue nodes
+    sc = ax.scatter(pos2d[:, 0], pos2d[:, 1],
+                    c=d_norm, cmap="YlOrRd", vmin=0, vmax=1,
+                    s=62, edgecolors="white", linewidths=0.5,
+                    zorder=3, alpha=0.88)
+
+    # Ligand centroid marker
+    ax.scatter(c2d[0], c2d[1], s=140, marker="*",
+               color="#d97706", edgecolors="white", linewidths=0.8,
+               zorder=5, label="Ligand centroid")
+
+    cb = plt.colorbar(sc, ax=ax, shrink=0.75, pad=0.02)
+    cb.set_label("Depth (PC3)", fontsize=7, color="#7a8b8c")
+    cb.ax.tick_params(labelsize=6, colors="#9aa4ae")
+
+    ax.set_xlabel("PC1", fontsize=8, color="#7a8b8c")
+    ax.set_ylabel("PC2", fontsize=8, color="#7a8b8c")
+    ax.tick_params(labelsize=7, colors="#9aa4ae")
+    for sp in ax.spines.values():
+        sp.set_color("#d0d7de")
+    ax.legend(fontsize=7, loc="upper right",
+              framealpha=0.75, edgecolor="#d0d7de")
+    ax.set_title(f"{pdb_id.upper()} — pocket Cα map",
+                 fontsize=9, color="#193a3b", fontweight="600", pad=8)
+
+    plt.tight_layout(pad=0.6)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=160, bbox_inches="tight",
+                facecolor="#fbfcfe")
+    plt.close(fig)
+    buf.seek(0)
+
+    stats = {
+        "n_residues":  n_res,
+        "n_contacts":  n_contacts,
+        "mean_edge_A": round(mean_edge, 2),
+        "pkd":         round(float(g.y_affinity.item()), 2),
+    }
+    return buf.getvalue(), stats
+
+
 def score_bar_html(label, value, display, pct, color, delta=""):
     delta_html = ""
     if delta:
@@ -879,24 +1095,227 @@ elif page == "Binding Predictor":
     default_idx = next((i for i, p in enumerate(pdb_ids) if p == "6e9a"), 0)
 
     st.markdown('<div class="section-label">Protein Pocket</div>', unsafe_allow_html=True)
-    pocket_col1, pocket_col2 = st.columns([2, 1])
-    with pocket_col1:
-        selected_label = st.selectbox(
-            "Select pocket (PDB ID — pKd)",
-            labels,
-            index=default_idx,
-            label_visibility="collapsed",
-            help="All 150 PDBbind training pockets, sorted by binding affinity (pKd)",
-        )
+    selected_label = st.selectbox(
+        "Select pocket (PDB ID — pKd)",
+        labels,
+        index=default_idx,
+        label_visibility="collapsed",
+        help="All 150 PDBbind training pockets, sorted by binding affinity (pKd)",
+    )
     selected_idx = labels.index(selected_label)
     selected_pdb = pdb_ids[selected_idx]
     selected_pkd = pocket_options[selected_idx][2]
-    with pocket_col2:
+
+    st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
+
+    # ── Cinematic Pocket Hero ─────────────────────────────────────────────────
+    _, pocket_stats = _pocket_viz(selected_pdb)
+    n_res  = pocket_stats.get("n_residues", "—")
+    n_con  = pocket_stats.get("n_contacts",  "—")
+    mean_e = pocket_stats.get("mean_edge_A", "—")
+    pv_pkd = pocket_stats.get("pkd", "—")
+
+    pocket_svg_str = _pocket_svg(selected_pdb)
+
+    import streamlit.components.v1 as components
+    components.html(f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ background:#f7f0e8; font-family:'Space Grotesk',sans-serif; padding:0; }}
+
+  .hero {{
+    display:flex; gap:0; border-radius:24px; overflow:hidden;
+    border:1px solid rgba(255,255,255,0.7);
+    box-shadow:0 8px 40px rgba(25,58,59,0.08);
+    height:460px; width:100%;
+  }}
+
+  /* ── Dark 3D Viewport ── */
+  .viewport {{
+    flex:1; background:#0d1f20; position:relative; overflow:hidden;
+    cursor:crosshair;
+  }}
+  .vp-grid {{
+    position:absolute; inset:0;
+    background-image:linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px);
+    background-size:40px 40px;
+  }}
+  .vp-glow {{
+    position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    width:340px; height:340px;
+    background:radial-gradient(circle,rgba(15,118,110,0.35) 0%,transparent 70%);
+    border-radius:50%;
+  }}
+  .vp-hud-tl {{
+    position:absolute; top:14px; left:14px; z-index:10;
+    display:flex; align-items:center; gap:8px;
+    background:rgba(13,31,32,0.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,0.1);
+    padding:6px 12px; border-radius:8px;
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(255,255,255,0.75);
+  }}
+  .hud-dot {{ width:7px; height:7px; border-radius:50%; background:#d97706; animation:hud-pulse 2s ease-in-out infinite; }}
+  @keyframes hud-pulse {{ 0%,100%{{opacity:0.6}} 50%{{opacity:1}} }}
+  .vp-hud-br {{
+    position:absolute; bottom:14px; left:14px; z-index:10;
+    display:flex; gap:16px;
+    font-family:'JetBrains Mono',monospace; font-size:9px; color:rgba(255,255,255,0.3);
+  }}
+  .vp-inner {{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform 0.15s ease-out;
+  }}
+
+  /* protein ribbon */
+  .ribbon-wrap {{
+    position:absolute; width:72%; height:72%;
+    animation:spin-slow 22s linear infinite;
+    opacity:0.65;
+  }}
+  @keyframes spin-slow {{ from{{transform:rotate(0deg)}} to{{transform:rotate(360deg)}} }}
+
+  /* ligand cpk */
+  .ligand-wrap {{
+    position:relative; z-index:20;
+    animation:float 8s ease-in-out infinite;
+  }}
+  @keyframes float {{ 0%,100%{{transform:translateY(0)}} 50%{{transform:translateY(-12px)}} }}
+  .ligand-glow {{
+    position:absolute; inset:-20px;
+    background:radial-gradient(circle,rgba(255,255,255,0.18) 0%,transparent 70%);
+    border-radius:50%;
+    animation:glow-pulse 3s ease-in-out infinite;
+  }}
+  @keyframes glow-pulse {{ 0%,100%{{opacity:0.6;transform:scale(1)}} 50%{{opacity:1;transform:scale(1.1)}} }}
+
+  /* annotation */
+  .annotation {{
+    position:absolute; top:20%; right:12%;
+    display:flex; flex-direction:column; align-items:flex-end; gap:4px;
+    pointer-events:none;
+  }}
+  .ann-chip {{
+    background:rgba(13,31,32,0.85); backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,0.15);
+    padding:4px 10px; border-radius:6px;
+    font-family:'JetBrains Mono',monospace; font-size:10px;
+    color:rgba(255,255,255,0.8);
+    display:flex; align-items:center; gap:6px;
+  }}
+  .ann-dot {{ width:5px; height:5px; border-radius:50%; background:white; opacity:0.7; }}
+
+</style>
+</head>
+<body>
+<div class="hero">
+
+  <!-- 3D Viewport -->
+  <div class="viewport" id="vp">
+    <div class="vp-grid"></div>
+    <div class="vp-glow"></div>
+    <div class="vp-hud-tl">
+      <div class="hud-dot"></div>
+      {selected_pdb.upper()} · ATP Binding Cleft
+    </div>
+    <div class="vp-hud-br">
+      <span>RESIDUES {n_res}</span>
+      <span>CONTACTS {n_con}</span>
+      <span>GNN ORACLE ACTIVE</span>
+    </div>
+
+    <div class="vp-inner" id="vp-inner">
+      <!-- Pocket-specific ribbon + CPK generated from Cα coords -->
+      {pocket_svg_str}
+
+      <!-- Annotation -->
+      <div class="annotation">
+        <div class="ann-chip"><div class="ann-dot"></div>LIGAND POSE</div>
+      </div>
+    </div><!-- vp-inner -->
+  </div><!-- viewport -->
+
+</div><!-- hero -->
+
+<script>
+  const inner = document.getElementById('vp-inner');
+  const vp    = document.getElementById('vp');
+  vp.addEventListener('mousemove', e => {{
+    const r  = vp.getBoundingClientRect();
+    const x  = (e.clientX - r.left  - r.width  / 2) / (r.width  / 2);
+    const y  = (e.clientY - r.top   - r.height / 2) / (r.height / 2);
+    inner.style.transform = `perspective(900px) rotateX(${{-y * 8}}deg) rotateY(${{x * 8}}deg)`;
+  }});
+  vp.addEventListener('mouseleave', () => {{
+    inner.style.transform = 'perspective(900px) rotateX(0deg) rotateY(0deg)';
+  }});
+</script>
+</body>
+</html>
+""", height=480)
+
+    # ── Micro-Environment stat chips (horizontal row below viewport) ──────────
+    _chip_css = """
+    <style>
+    .me-row { display:flex; gap:14px; margin:10px 0 4px; }
+    .me-chip {
+        flex:1; border-radius:14px; padding:14px 18px;
+        border:1px solid rgba(255,255,255,0.6);
+        background:rgba(255,255,255,0.72); backdrop-filter:blur(10px);
+        display:flex; flex-direction:column; gap:6px;
+        border-left-width:4px; border-left-style:solid;
+        box-shadow:0 2px 12px rgba(25,58,59,0.06);
+    }
+    .me-chip-label {
+        font-size:10px; font-weight:700; text-transform:uppercase;
+        letter-spacing:0.09em; color:#7a8b8c;
+        display:flex; align-items:center; gap:7px;
+    }
+    .me-dot { width:8px; height:8px; border-radius:50%; }
+    .me-val {
+        font-family:'JetBrains Mono',monospace;
+        font-size:30px; font-weight:700;
+        letter-spacing:-0.04em; line-height:1; color:#193a3b;
+    }
+    .me-sub { font-size:10px; color:#9aa4ae; }
+    </style>
+    """
+    st.markdown(_chip_css, unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3, gap="small")
+    with c1:
         st.markdown(f"""
-        <div class="metric-card teal" style="padding:0.8rem 1rem;margin-bottom:0">
-            <div class="metric-label">Pocket pKd</div>
-            <div class="metric-value" style="font-size:1.5rem">{selected_pkd:.2f}</div>
-            <div class="metric-sub">{selected_pdb.upper()}</div>
+        <div class="me-chip" style="border-left-color:#0f766e">
+          <div class="me-chip-label">
+            <div class="me-dot" style="background:#0f766e"></div>Residues
+          </div>
+          <div class="me-val">{n_res}</div>
+          <div class="me-sub">Cα nodes in graph</div>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="me-chip" style="border-left-color:#d97706">
+          <div class="me-chip-label">
+            <div class="me-dot" style="background:#d97706"></div>Contacts
+          </div>
+          <div class="me-val">{n_con}</div>
+          <div class="me-sub">mean {mean_e} Å</div>
+        </div>""", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="me-chip" style="border-left-color:#2563eb">
+          <div class="me-chip-label">
+            <div class="me-dot" style="background:#2563eb"></div>Target pKd
+          </div>
+          <div class="me-val">{pv_pkd}</div>
+          <div class="me-sub">{selected_pdb.upper()} · PDBbind</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:0.8rem'></div>", unsafe_allow_html=True)
@@ -989,20 +1408,27 @@ elif page == "Binding Predictor":
                 delta_html = ""
 
             c1, c2, c3 = st.columns(3)
-            c1.markdown(f"""<div class="metric-card teal">
-                <div class="metric-label">Predicted pKd ({selected_pdb.upper()})</div>
-                <div class="metric-value">{pred_pkd:.2f}</div>
-                <div class="metric-sub">vs pocket pKd {selected_pkd:.2f}</div>
+            c1.markdown(f"""
+            <div class="metric-card teal" style="border-top:3px solid #0f766e;border-left:none;padding:1.4rem 1.6rem">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.8rem">
+                  <div class="metric-label">Predicted pKd · {selected_pdb.upper()}</div>
+                  <span style="font-size:0.68rem;background:rgba(255,255,255,0.8);border:1px solid rgba(0,0,0,0.06);padding:2px 8px;border-radius:6px;color:#7a8b8c">GNN Output</span>
+                </div>
+                <div style="font-family:ui-monospace,monospace;font-size:3rem;font-weight:700;letter-spacing:-0.04em;color:#0f766e;line-height:1">{pred_pkd:.2f}</div>
+                <div class="metric-sub" style="margin-top:6px">vs pocket pKd {selected_pkd:.2f}</div>
             </div>""", unsafe_allow_html=True)
-            c2.markdown(f"""<div class="metric-card amber">
-                <div class="metric-label">Pose Quality</div>
-                <div class="metric-value">{pred_pose:.2f}</div>
-                <div class="metric-sub">P(RMSD &lt; 2Å)</div>
+            c2.markdown(f"""
+            <div class="metric-card amber" style="border-top:3px solid #d97706;border-left:none;padding:1.4rem 1.6rem">
+                <div class="metric-label" style="margin-bottom:0.8rem">Pose Quality</div>
+                <div style="font-family:ui-monospace,monospace;font-size:3rem;font-weight:700;letter-spacing:-0.04em;color:#d97706;line-height:1">{pred_pose:.2f}</div>
+                <div class="metric-sub" style="margin-top:6px">P(RMSD &lt; 2Å)</div>
             </div>""", unsafe_allow_html=True)
-            c3.markdown(f"""<div class="metric-card {sel_color}">
-                <div class="metric-label">{sel_label}</div>
-                <div class="metric-value">{sel_value}</div>
-                <div class="metric-sub">{sel_sub}</div>
+            delta_color = "#0f766e" if sel_color=="teal" else "#2563eb" if sel_color=="blue" else "#d97757"
+            c3.markdown(f"""
+            <div class="metric-card {sel_color}" style="border-top:3px solid {delta_color};border-left:none;padding:1.4rem 1.6rem">
+                <div class="metric-label" style="margin-bottom:0.8rem">{sel_label}</div>
+                <div style="font-family:ui-monospace,monospace;font-size:3rem;font-weight:700;letter-spacing:-0.04em;color:{delta_color};line-height:1">{sel_value}</div>
+                <div class="metric-sub" style="margin-top:6px">{sel_sub}</div>
             </div>""", unsafe_allow_html=True)
 
             pkd_pct      = min(100, max(0, (pred_pkd  - 2) / 10 * 100))
@@ -1010,8 +1436,8 @@ elif page == "Binding Predictor":
             egfr_display = f"{egfr_pkd:.2f}" if not np.isnan(egfr_pkd) else "—"
 
             st.markdown(f"""
-            <div class="glass" style="padding:1.4rem 1.6rem;margin-top:0.5rem">
-                <div class="section-label">Binding &amp; Drug-likeness Profile</div>
+            <div class="glass" style="padding:1.6rem 2rem;margin-top:0.5rem">
+                <div class="section-label" style="margin-bottom:1.2rem">Physicochemical Profile</div>
                 {score_bar_html(f"pKd · {selected_pdb.upper()}", pred_pkd, f"{pred_pkd:.2f}", pkd_pct,
                     "#0f766e" if pred_pkd>8 else "#2563eb" if pred_pkd>6 else "#d97706")}
                 {score_bar_html("pKd · EGFR (6E9A ref)", egfr_pkd if not np.isnan(egfr_pkd) else 0,
