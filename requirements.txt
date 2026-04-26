@@ -12,6 +12,8 @@ gemmi==0.7.5
 # RL / stats
 seaborn==0.13.2
 scipy==1.12.0
+scikit-learn==1.4.2
+matplotlib==3.8.4
 numpy==1.26.4
 pandas==2.2.1
 
