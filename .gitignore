@@ -55,6 +55,8 @@ graphify-out/
 
 # Generic local logs and temp files
 *.log
+mlruns/
+notebooks/mlruns/
 tmp/
 temp/
 

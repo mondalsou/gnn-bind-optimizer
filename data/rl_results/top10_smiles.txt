@@ -1,0 +1,11 @@
+                                                     smiles  reward_total  pred_pkd    r_qed
+                           O=C(Nc1ccccc1)c1cccc(C(F)(F)F)c1      0.718876  7.469193 0.874520
+             NS(=O)(=O)c1ccc(C(=O)N2CCC(O)(c3ccccc3)CC2)cc1      0.705207  7.462093 0.865110
+            Cc1ccc(C(=O)NC2C=C2)cc1-c1ccc(C(=O)NCC2C=C2)cc1      0.676717  7.411624 0.790533
+                            Cc1ccc(C(=O)NCCCCCCC(=O)N=O)cc1      0.653566  7.556640 0.585520
+                                       O=C(O)C(=O)Cc1ccccc1      0.651119  6.973795 0.674542
+          Nc1nc(Nc2ccc(S(N)(=O)=O)cc2)nn1C(=O)c1c(F)cccc1Cl      0.638686  7.382211 0.593050
+O=C(Nn1c(=O)c(=O)[nH]c2cc(C(F)(F)F)c(-n3ccnc3)cc21)c1ccccc1      0.613131  7.365231 0.501449
+                           [NH3+][C@@H](Cc1ccc(O)cc1)C(=O)O      0.610969  7.125665 0.595824
+                                        [H]/N=C(\N)c1ccccc1      0.599921  7.417984 0.420789
+             C=CN(Cc1ccccc1)c1ccc(C(=O)NCCCCCCCC(=O)N=O)cc1      0.597600  7.526003 0.365550

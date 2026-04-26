@@ -6,6 +6,8 @@ torch-geometric==2.5.2
 # Chemistry
 rdkit==2024.3.1
 biopython==1.83
+meeko==0.7.1
+gemmi==0.7.5
 
 # RL / stats
 seaborn==0.13.2

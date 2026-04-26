@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
 
   # ── 1. SQL Server 2022 ────────────────────────────────────────────────────
@@ -31,7 +29,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.mlflow
     environment:
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      MLFLOW_BACKEND_STORE_URI: ${MLFLOW_BACKEND_STORE_URI}
     ports:
       - "5000:5000"
     volumes:
@@ -46,7 +44,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.trainer
     environment:
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
     volumes:
       - ./data:/workspace/data
       - ./checkpoints:/workspace/checkpoints
@@ -63,7 +61,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.rl
     environment:
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
       DB_SERVER: sqlserver
       DB_PORT: "1433"
       DB_NAME: gnnbind
@@ -90,7 +88,7 @@ services:
       DB_NAME: gnnbind
       DB_USER: sa
       DB_PASSWORD: ${MSSQL_SA_PASSWORD:-GnnBind0ptimizer!}
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"
     volumes:

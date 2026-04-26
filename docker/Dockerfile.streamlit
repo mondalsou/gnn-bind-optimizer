@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /workspace
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libxrender1 libxext6 libgomp1 \
+    libxrender1 libxext6 libgomp1 autodock-vina \
     unixodbc-dev curl gnupg \
     && curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor \
        -o /usr/share/keyrings/microsoft-prod.gpg \
@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir \
     torch==2.2.0 \
     pytorch-lightning==2.2.0 \
     rdkit==2024.3.1 \
+    meeko==0.7.1 \
+    gemmi==0.7.5 \
     numpy==1.26.4 \
     pandas==2.2.2 \
     scipy==1.12.0 \
@@ -31,8 +33,7 @@ RUN pip install --no-cache-dir torch-geometric==2.5.2
 
 COPY src/ /workspace/src/
 COPY app/ /workspace/app/
-COPY data/ /workspace/data/
-COPY checkpoints/ /workspace/checkpoints/
+RUN mkdir -p /workspace/data /workspace/checkpoints
 
 ENV PYTHONPATH=/workspace
 EXPOSE 8501

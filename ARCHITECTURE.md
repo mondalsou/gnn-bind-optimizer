@@ -182,7 +182,7 @@ Five pages, dark glassmorphism design (Space Grotesk + Instrument Serif, warm cr
 | **Summary** | KPI cards (RMSE, Pearson r, Pose AUC, best pKd), 3-phase project cards, MTL vs STL bar chart, RL reward curve (mean + max) |
 | **Binding Predictor** | SMILES input → GNN inference → pKd, pose probability, selectivity metric cards + 2D structure |
 | **RL Generator** | Dynamic pocket chip (⬡ Pocket 6E9A · pKd 11.92), card grid of top 18 molecules (structure SVG, pKd, QED, reward) |
-| **GNN vs Vina** | Live GNN inference on RL top-20 SMILES → parity scatter + table vs Vina benchmark |
+| **GNN vs Vina** | Live GNN inference on RL top molecules → Meeko PDBQT prep → AutoDock Vina docking → parity scatter + table |
 | **SQL Console** | Free-text SELECT → result table + CSV download |
 
 Header badge is dynamic — reads `ref_pocket` and `ref_pkd` from `rl_results.json` at startup.
@@ -192,7 +192,7 @@ Header badge is dynamic — reads `ref_pocket` and `ref_pkd` from `rl_results.js
 ## 7. Limitations & Future Work
 
 1. **Dataset size (150 samples):** PDBbind refined set filtered to 150 for speed. Production training would use 5000+ complexes with cross-validation across protein families. MTL benefit over STL is expected to be more pronounced at that scale.
-2. **Oracle fidelity:** GNN oracle replaces proper docking. A production RL loop would call AutoDock Vina or FEP+ for scoring.
+2. **Oracle fidelity:** The RL loop still uses the fast frozen GNN oracle, while the Streamlit comparison page can now run AutoDock Vina post hoc for top generated molecules. A production RL loop would call AutoDock Vina or FEP+ during scoring rather than only for comparison.
 3. **SMILES generator validity:** Character-level LSTM achieves high validity on this run (100% reported); fragment-based generators (REINVENT 4, GraphINVENT) typically yield more structurally diverse output.
 4. **Selectivity labels:** Binary EGFR/ABL1 selectivity head uses synthetic labels derived from known inhibitor annotations. Real selectivity data would require paired kinase assay results.
 5. **No 3D equivariance:** HGTConv is not SE(3)-equivariant. Switching to DimeNet++ or EGNN would improve geometric fidelity for affinity prediction.

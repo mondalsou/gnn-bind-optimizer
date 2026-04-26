@@ -3,6 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import re, io, json
+from html import escape
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -22,9 +23,30 @@ CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 
+:root {
+    --bg: #f7f0e8;
+    --ink: #19212a;
+    --muted: #5f6b76;
+    --faint: #9aa4ae;
+    --teal: #0f766e;
+    --teal-dark: #193a3b;
+    --blue: #2563eb;
+    --amber: #d97706;
+    --coral: #d97757;
+    --card: rgba(255,255,255,0.84);
+    --line: rgba(25,33,42,0.09);
+    --shadow: 0 4px 40px rgba(25,58,59,0.06), 0 1px 8px rgba(25,58,59,0.03);
+}
+
 html, body, [class*="css"] {
     font-family: 'Space Grotesk', -apple-system, sans-serif !important;
-    background: #f7f0e8 !important;
+    background: var(--bg) !important;
+}
+
+#MainMenu, footer, header { visibility: hidden; }
+
+.block-container {
+    padding-top: 1.3rem !important;
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
@@ -33,21 +55,59 @@ html, body, [class*="css"] {
     border-right: 1px solid rgba(255,255,255,0.06) !important;
 }
 [data-testid="stSidebar"] * { color: #edf7f5 !important; }
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] { display: none; }
+[data-testid="stSidebar"] .block-container {
+    padding: 1.4rem 1.1rem 1.7rem !important;
+}
+.sidebar-brand {
+    padding: 0.4rem 0.25rem 1.25rem;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    margin-bottom: 1.1rem;
+}
+.sidebar-logo {
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #ffffff;
+}
+.sidebar-logo em {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    color: #9ff5e7;
+}
+.sidebar-caption {
+    color: rgba(237,247,245,0.58) !important;
+    font-size: 0.76rem;
+    line-height: 1.35;
+    margin-top: 0.35rem;
+}
 [data-testid="stSidebar"] .stRadio label {
     color: #edf7f5 !important;
-    font-size: 1.1rem !important;
+    font-size: 0.98rem !important;
     font-weight: 500 !important;
     letter-spacing: 0 !important;
     text-transform: none !important;
-    padding: 0.25rem 0 !important;
+    padding: 0.28rem 0 !important;
 }
 [data-testid="stSidebar"] .stRadio [data-testid="stWidgetLabel"] {
     font-size: 1.1rem !important;
 }
 [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {
-    font-size: 1.1rem !important;
+    font-size: 0.98rem !important;
     letter-spacing: 0 !important;
     text-transform: none !important;
+}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+    gap: 0.25rem;
+}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+    border-radius: 12px;
+    padding: 0.42rem 0.55rem !important;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:hover {
+    background: rgba(255,255,255,0.08);
 }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
     color: rgba(237,247,245,0.5) !important;
@@ -55,26 +115,64 @@ html, body, [class*="css"] {
     text-transform: uppercase;
     letter-spacing: 0.1em;
 }
+.sidebar-card {
+    margin-top: 1rem;
+    padding: 0.9rem;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.10);
+}
+.sidebar-card-title {
+    color: rgba(237,247,245,0.62);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.55rem;
+}
+.sidebar-card-line {
+    display:flex;
+    justify-content:space-between;
+    gap: 0.8rem;
+    font-size: 0.76rem;
+    color: rgba(237,247,245,0.70);
+    margin-top: 0.35rem;
+}
+.sidebar-card-line strong {
+    color: #ffffff;
+    font-weight: 700;
+}
 
 /* ── Main canvas ─────────────────────────────────────────────────────────── */
 .stApp, .main .block-container {
-    background: #f7f0e8 !important;
+    background: var(--bg) !important;
     max-width: 1400px !important;
     padding: 1.5rem 2rem !important;
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .gnn-header {
-    background: rgba(255,255,255,0.85);
+    background: linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.72));
     backdrop-filter: blur(14px);
     border: 1px solid rgba(255,255,255,0.6);
-    border-radius: 28px;
+    border-radius: 22px;
     padding: 1.2rem 1.8rem;
-    margin-bottom: 1.8rem;
+    margin-bottom: 1.35rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    box-shadow: 0 4px 40px rgba(25,58,59,0.06);
+    gap: 1rem;
+    box-shadow: var(--shadow);
+}
+.gnn-header-main {
+    min-width: 0;
+}
+.gnn-header-meta {
+    display:flex;
+    align-items:center;
+    gap:0.55rem;
+    flex-wrap:wrap;
+    justify-content:flex-end;
 }
 .gnn-logo {
     font-size: 1.5rem;
@@ -108,24 +206,92 @@ html, body, [class*="css"] {
     background: #0f766e;
     display: inline-block;
 }
+.gnn-badge.secondary {
+    background: rgba(25,33,42,0.06);
+    color: #5f6b76;
+}
+.gnn-badge.secondary::before { background: #9aa4ae; }
+
+/* ── Page framing ────────────────────────────────────────────────────────── */
+.page-head {
+    margin: 0.2rem 0 1.15rem;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:1.2rem;
+}
+.page-kicker {
+    font-size:0.68rem;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    color:#0f766e;
+    margin-bottom:0.35rem;
+}
+.page-title {
+    font-size:2rem;
+    font-weight:700;
+    color:#193a3b;
+    letter-spacing:-0.03em;
+    line-height:1.04;
+    margin:0;
+}
+.page-copy {
+    color:#7a8b8c;
+    font-size:0.95rem;
+    margin:0.45rem 0 0;
+    max-width: 760px;
+}
+.page-chip-row {
+    display:flex;
+    gap:0.45rem;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+}
+.micro-chip {
+    background:#f0ebe3;
+    color:#6d6848;
+    font-size:0.68rem;
+    font-family:ui-monospace,monospace;
+    padding:0.26rem 0.62rem;
+    border-radius:7px;
+    border:1px solid rgba(109,104,72,0.18);
+    white-space:nowrap;
+}
+.micro-chip.teal {
+    background:#193a3b;
+    color:#7efce1;
+    border-color:#2d5e5f;
+    font-weight:700;
+}
+.micro-chip.blue {
+    background:#d9e8ee;
+    color:#335356;
+    border-color:#bed1d7;
+}
+.micro-chip.amber {
+    background:#e9e3c7;
+    color:#6d6848;
+    border-color:#d5cca6;
+}
 
 /* ── Glassmorphism card ───────────────────────────────────────────────────── */
 .glass {
-    background: rgba(255,255,255,0.84);
+    background: var(--card);
     backdrop-filter: blur(14px);
     border: 1px solid rgba(255,255,255,0.6);
-    border-radius: 24px;
-    box-shadow: 0 4px 40px rgba(25,58,59,0.06), 0 1px 8px rgba(25,58,59,0.03);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
 }
 
 /* ── Metric card ─────────────────────────────────────────────────────────── */
 .metric-card {
-    background: rgba(255,255,255,0.84);
+    background: var(--card);
     backdrop-filter: blur(14px);
     border: 1px solid rgba(255,255,255,0.6);
-    border-radius: 24px;
+    border-radius: 18px;
     padding: 1.4rem 1.5rem;
-    box-shadow: 0 4px 40px rgba(25,58,59,0.06);
+    box-shadow: var(--shadow);
     margin-bottom: 1rem;
 }
 .metric-card.teal  { border-left: 4px solid #0f766e; }
@@ -233,7 +399,9 @@ html, body, [class*="css"] {
 
 /* ── Inputs ──────────────────────────────────────────────────────────────── */
 .stTextInput > div > div > input,
-.stTextArea textarea {
+.stTextArea textarea,
+.stSelectbox [data-baseweb="select"] > div,
+.stNumberInput input {
     background: rgba(255,255,255,0.9) !important;
     border: 1px solid rgba(25,33,42,0.12) !important;
     border-radius: 14px !important;
@@ -270,6 +438,14 @@ html, body, [class*="css"] {
     border: 1px solid rgba(25,33,42,0.07) !important;
 }
 
+.empty-state {
+    border: 1px dashed rgba(25,58,59,0.22);
+    background: rgba(255,255,255,0.45);
+    border-radius: 18px;
+    padding: 1.2rem 1.4rem;
+    color: #5f6b76;
+}
+
 /* ── Altair charts ───────────────────────────────────────────────────────── */
 .vega-embed { border-radius: 16px !important; }
 
@@ -281,6 +457,26 @@ html, body, [class*="css"] {
     border-radius: 999px !important;
     font-weight: 600 !important;
     font-size: 0.8rem !important;
+}
+
+@media (max-width: 900px) {
+    .stApp, .main .block-container {
+        padding: 1rem !important;
+    }
+    .gnn-header,
+    .page-head {
+        align-items:flex-start;
+        flex-direction:column;
+    }
+    .gnn-header-meta,
+    .page-chip-row {
+        justify-content:flex-start;
+    }
+    .page-title { font-size:1.55rem; }
+    .metric-value { font-size:1.65rem; }
+    .score-row { align-items:flex-start; flex-direction:column; gap:5px; }
+    .score-name, .score-val, .score-delta { width:auto; text-align:left; }
+    .score-bar-bg { width:100%; flex:none; }
 }
 </style>
 """
@@ -298,13 +494,38 @@ except Exception:
 
 st.markdown(f"""
 <div class="gnn-header">
-  <div>
+  <div class="gnn-header-main">
     <div class="gnn-logo">GNN<em>Bind</em>Optimizer</div>
     <div class="gnn-tagline">Structure-aware binding affinity prediction + RL molecular generation</div>
   </div>
-  <div class="gnn-badge">Model: HeteroGNN &nbsp;·&nbsp; Oracle: Frozen &nbsp;·&nbsp; Pocket: {_hdr_pocket} &nbsp;·&nbsp; pKd {_hdr_pkd_str}</div>
+  <div class="gnn-header-meta">
+    <div class="gnn-badge">Pocket {_hdr_pocket} · pKd {_hdr_pkd_str}</div>
+    <div class="gnn-badge secondary">HeteroGNN · frozen oracle</div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
+
+
+def page_header(kicker: str, title: str, copy: str, chips: list[tuple[str, str]] | None = None) -> None:
+    """Render a consistent page title area with optional status chips."""
+    chip_html = ""
+    if chips:
+        rendered = []
+        for label, tone in chips:
+            css_class = f"micro-chip {tone}".strip()
+            rendered.append(f'<span class="{css_class}">{escape(label)}</span>')
+        chip_html = f'<div class="page-chip-row">{"".join(rendered)}</div>'
+
+    st.markdown(f"""
+    <div class="page-head">
+      <div>
+        <div class="page-kicker">{escape(kicker)}</div>
+        <h2 class="page-title">{escape(title)}</h2>
+        <p class="page-copy">{escape(copy)}</p>
+      </div>
+      {chip_html}
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 def _db_configured() -> bool:
@@ -420,7 +641,7 @@ def mol_svg_html(smiles: str, prev_smiles: str | None = None) -> str:
         note = ('<div class="change-note">🟡 Yellow = modified region vs previous</div>'
                 if highlighted else "")
         return f'<div class="mol-panel">{svg}</div>{note}'
-    return f'<div class="mol-panel"><div class="mol-fallback">{smiles}</div></div>'
+    return f'<div class="mol-panel"><div class="mol-fallback">{escape(smiles)}</div></div>'
 
 
 @st.cache_data(show_spinner=False)
@@ -861,9 +1082,15 @@ def _rl_summary() -> dict:
 
 
 # ── Sidebar nav ───────────────────────────────────────────────────────────────
-st.sidebar.markdown('<p>Navigation</p>', unsafe_allow_html=True)
+st.sidebar.markdown("""
+<div class="sidebar-brand">
+  <div class="sidebar-logo">GNN<em>Bind</em></div>
+  <div class="sidebar-caption">Binding affinity prediction, molecule generation, and SQL-backed experiment review.</div>
+</div>
+<p>Navigation</p>
+""", unsafe_allow_html=True)
 PAGES = ["Summary", "Binding Predictor", "RL Generator", "GNN vs Vina", "SQL Console"]
-page  = st.sidebar.radio("", PAGES, label_visibility="collapsed")
+page  = st.sidebar.radio("Navigation", PAGES, label_visibility="collapsed")
 
 # DB status pill — no warning, just a quiet indicator
 if _db_configured():
@@ -879,6 +1106,15 @@ else:
         'border-radius:999px;padding:3px 10px;font-size:0.7rem;font-weight:600">'
         '○ Local mode · demo data</span>',
         unsafe_allow_html=True)
+
+st.sidebar.markdown(f"""
+<div class="sidebar-card">
+  <div class="sidebar-card-title">Active Context</div>
+  <div class="sidebar-card-line"><span>Pocket</span><strong>{escape(_hdr_pocket)}</strong></div>
+  <div class="sidebar-card-line"><span>Reference pKd</span><strong>{escape(_hdr_pkd_str)}</strong></div>
+  <div class="sidebar-card-line"><span>Model</span><strong>HGTConv MTL</strong></div>
+</div>
+""", unsafe_allow_html=True)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # PAGE 1 — Summary
@@ -947,14 +1183,16 @@ if page == "Summary":
 
     S = _summary_data()
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    st.markdown("""
-    <h2 style="font-family:'Space Grotesk',sans-serif;font-size:2rem;font-weight:700;
-               color:#193a3b;letter-spacing:-0.03em;margin:0 0 0.25rem 0">Project Summary</h2>
-    <p style="color:#7a8b8c;font-size:0.95rem;margin:0 0 1.8rem 0">
-      Structure-aware binding affinity prediction + RL molecular generation · PDBbind v2020
-    </p>
-    """, unsafe_allow_html=True)
+    page_header(
+        "Project Overview",
+        "Structure-Aware Drug Design Workspace",
+        "A compact readout of dataset construction, HeteroGNN performance, and RL molecular optimization progress.",
+        [
+            ("PDBbind v2020", "amber"),
+            (f"{S['rl_steps']} RL steps", "blue"),
+            (f"Pocket {S['rl_pocket']}", "teal"),
+        ],
+    )
 
     # ── 5 KPI chips ───────────────────────────────────────────────────────────
     k1,k2,k3,k4,k5 = st.columns(5)
@@ -1086,6 +1324,17 @@ if page == "Summary":
 elif page == "Binding Predictor":
     from rdkit import Chem
     from rdkit.Chem import Descriptors, QED as RDKitQED
+
+    page_header(
+        "Interactive Oracle",
+        "Binding Predictor",
+        "Choose a protein pocket, inspect its graph-derived microenvironment, and score a ligand SMILES with the frozen HeteroGNN.",
+        [
+            ("Live GNN inference", "teal"),
+            ("RDKit descriptors", "blue"),
+            ("EGFR delta", "amber"),
+        ],
+    )
 
     # ── Pocket selector ───────────────────────────────────────────────────────
     pocket_options = _pocket_options()   # [(label, pdb_id, pkd), ...]
@@ -1467,33 +1716,21 @@ elif page == "RL Generator":
     _rl_summ_pre = _rl_summary()
     _ref_pocket  = _rl_summ_pre.get("ref_pocket", "6E9A")
     _ref_pkd     = _rl_summ_pre.get("ref_pkd", 0)
-    _pocket_label = f"⬡ Pocket {_ref_pocket}"
+    _pocket_label = f"Pocket {_ref_pocket}"
     if _ref_pkd:
         _pocket_label += f" · pKd {_ref_pkd:.2f}"
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    st.markdown(f"""
-    <div style="margin-bottom:0.4rem">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.8rem">
-        <span style="background:#e2dfc6;color:#6d6848;font-size:0.68rem;font-family:ui-monospace,monospace;
-              padding:2px 8px;border-radius:4px;border:1px solid #cdc8a6">REINFORCE</span>
-        <span style="background:#c2d6d8;color:#335356;font-size:0.68rem;font-family:ui-monospace,monospace;
-              padding:2px 8px;border-radius:4px;border:1px solid #a2b5b7">GNN oracle</span>
-        <span style="background:#193a3b;color:#7efce1;font-size:0.72rem;font-family:ui-monospace,monospace;
-              padding:3px 12px;border-radius:6px;border:1px solid #2d5e5f;font-weight:700;
-              letter-spacing:0.05em">{_pocket_label}</span>
-        <span style="background:#f0ebe3;color:#7a6f65;font-size:0.68rem;font-family:ui-monospace,monospace;
-              padding:2px 8px;border-radius:4px">R = 0.5·affinity + 0.2·QED + 0.2·SA + 0.1·MW</span>
-      </div>
-      <h2 style="font-family:'Space Grotesk',sans-serif;font-size:2rem;font-weight:700;
-                 color:#193a3b;letter-spacing:-0.03em;margin:0 0 0.3rem 0">
-        Top 10 Generated Molecules
-      </h2>
-      <p style="color:#7a8b8c;font-size:0.95rem;margin:0">
-        Filtered by multi-parameter optimization · high predicted binding affinity + drug-likeness
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
+    page_header(
+        "RL Optimization",
+        "Molecule Browser",
+        "Explore generated candidates by reward, predicted affinity, and drug-likeness without losing the structures.",
+        [
+            ("REINFORCE", "amber"),
+            ("GNN oracle", "blue"),
+            (_pocket_label, "teal"),
+            ("0.5 affinity + 0.2 QED + 0.2 SA + 0.1 MW", ""),
+        ],
+    )
 
     # ── Data ──────────────────────────────────────────────────────────────────
     # Prefer JSON (live run results) over SQL seed data
@@ -1511,8 +1748,41 @@ elif page == "RL Generator":
     if df.empty:
         st.info("No RL results — run Phase 3 notebook first.")
     else:
-        top10 = df.nlargest(10, "reward").reset_index(drop=True)
-        st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
+        display_df = df.copy()
+        for col, default in [("reward", 0.0), ("pred_pkd", 0.0), ("r_qed", 0.0)]:
+            if col not in display_df.columns:
+                display_df[col] = default
+            display_df[col] = pd.to_numeric(display_df[col], errors="coerce").fillna(default)
+
+        st.markdown('<div class="section-label">Filter and rank generated molecules</div>', unsafe_allow_html=True)
+        f1, f2, f3, f4 = st.columns([1.15, 1, 1, 1])
+        sort_label = f1.selectbox(
+            "Sort by",
+            ["Reward", "Predicted pKd", "QED"],
+            index=0,
+            help="Rank generated molecules by the selected score.",
+        )
+        min_pkd = f2.slider("Minimum pKd", 0.0, 12.0, 0.0, 0.25)
+        min_qed = f3.slider("Minimum QED", 0.0, 1.0, 0.0, 0.05)
+        max_show = min(20, len(display_df))
+        min_show = 1 if max_show < 4 else 4
+        show_n = f4.slider("Show", min_show, max_show, min(10, max_show), 1)
+
+        sort_col = {"Reward": "reward", "Predicted pKd": "pred_pkd", "QED": "r_qed"}[sort_label]
+        filtered = display_df[
+            (display_df["pred_pkd"] >= min_pkd) &
+            (display_df["r_qed"] >= min_qed)
+        ].sort_values(sort_col, ascending=False)
+
+        if filtered.empty:
+            st.markdown(
+                '<div class="empty-state">No generated molecules match the current filters.</div>',
+                unsafe_allow_html=True,
+            )
+            st.stop()
+
+        top10 = filtered.head(show_n).reset_index(drop=True)
+        st.caption(f"Showing {len(top10)} of {len(display_df)} generated molecules.")
 
         # ── Molecule card grid (2 columns) ────────────────────────────────────
         RANK_NUMS = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨","⑩"]
@@ -1588,7 +1858,7 @@ elif page == "RL Generator":
         col_a, col_b = st.columns(2, gap="large")
         for i, row in top10.iterrows():
             col = col_a if i % 2 == 0 else col_b
-            smiles = row["smiles"]
+            smiles = str(row["smiles"])
             pkd_v  = row.get("pred_pkd", 0) or 0
             qed_v  = row.get("r_qed", 0) or 0
             rew_v  = row.get("reward", 0) or 0
@@ -1598,7 +1868,7 @@ elif page == "RL Generator":
             svg_html, _ = mol_svg(smiles, w=380, h=220)
             struct_html = svg_html if svg_html else (
                 f'<div style="font-family:monospace;font-size:0.7rem;color:#9aa4ae;padding:1rem;'
-                f'word-break:break-all">{smiles}</div>'
+                f'word-break:break-all">{escape(smiles)}</div>'
             )
 
             smiles_short = smiles if len(smiles) <= 42 else smiles[:40] + "…"
@@ -1612,7 +1882,7 @@ elif page == "RL Generator":
                       <span class="rank-badge" style="background:{rank_bg}">{rank}</span>
                       <span style="font-family:ui-monospace,monospace;font-size:0.72rem;
                             color:#5f6b76;overflow:hidden;text-overflow:ellipsis;
-                            white-space:nowrap;flex:1">{smiles_short}</span>
+                            white-space:nowrap;flex:1">{escape(smiles_short)}</span>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
                       <div class="stat-badge stat-teal">
@@ -1644,28 +1914,17 @@ elif page == "GNN vs Vina":
     _rl_pocket = _rl_summ.get("ref_pocket", "6E9A")
     _rl_n      = min(20, len(_rl_pre))
 
-    st.markdown(f"""
-    <div style="margin-bottom:1.4rem">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0.8rem">
-        <span style="background:#193a3b;color:#7efce1;font-size:0.72rem;font-family:ui-monospace,monospace;
-              padding:3px 12px;border-radius:6px;border:1px solid #2d5e5f;font-weight:700;
-              letter-spacing:0.05em">⬡ Pocket {_rl_pocket}</span>
-        <span style="background:#e2dfc6;color:#6d6848;font-size:0.68rem;font-family:ui-monospace,monospace;
-              padding:2px 8px;border-radius:4px;border:1px solid #cdc8a6">Top {_rl_n} RL molecules</span>
-        <span style="background:#c2d6d8;color:#335356;font-size:0.68rem;font-family:ui-monospace,monospace;
-              padding:2px 8px;border-radius:4px;border:1px solid #a2b5b7">GNN oracle</span>
-        <span style="background:#f0ebe3;color:#7a6f65;font-size:0.68rem;font-family:ui-monospace,monospace;
-              padding:2px 8px;border-radius:4px">vs AutoDock Vina</span>
-      </div>
-      <h2 style="font-family:'Space Grotesk',sans-serif;font-size:2rem;font-weight:700;
-                 color:#193a3b;letter-spacing:-0.03em;margin:0 0 0.3rem 0">
-        GNN Predictions vs AutoDock Vina
-      </h2>
-      <p style="color:#7a8b8c;font-size:0.95rem;margin:0">
-        Same top {_rl_n} molecules from RL Generator · GNN pKd vs Vina docking score · how well the oracle agrees
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
+    page_header(
+        "Benchmark View",
+        "GNN Predictions vs AutoDock Vina",
+        f"Compare top RL molecules across GNN pKd predictions and real AutoDock Vina docking scores.",
+        [
+            (f"Pocket {_rl_pocket}", "teal"),
+            (f"Up to {_rl_n} RL molecules", "amber"),
+            ("GNN oracle", "blue"),
+            ("AutoDock Vina", ""),
+        ],
+    )
 
     df = _db_query("""
         SELECT smiles, pocket_pdb, vina_score, gnn_pred_pkd,
@@ -1675,7 +1934,23 @@ elif page == "GNN vs Vina":
     if df.empty:
         # Use top-20 RL SMILES; run live GNN inference for real pKd values
         import torch
-        _rl_top = (_rl_pre.nlargest(_rl_n, "reward")
+
+        max_dock = st.slider(
+            "Molecules to dock with Vina",
+            min_value=1,
+            max_value=max(1, _rl_n),
+            value=min(10, max(1, _rl_n)),
+            help="Real docking is slower than the GNN oracle; keep this lower for quick UI iteration.",
+        )
+        exhaustiveness = st.slider(
+            "Vina exhaustiveness",
+            min_value=1,
+            max_value=16,
+            value=4,
+            help="Higher values search more thoroughly and take longer.",
+        )
+
+        _rl_top = (_rl_pre.nlargest(max_dock, "reward")
                    .reset_index(drop=True) if not _rl_pre.empty else pd.DataFrame())
 
         _smiles_list = list(_rl_top["smiles"]) if not _rl_top.empty else []
@@ -1706,27 +1981,68 @@ elif page == "GNN vs Vina":
             st.stop()
         _smiles_list, _gnn_pkd = zip(*valid)
 
-        rng = np.random.RandomState(42)
-        _vina = np.array(_gnn_pkd) + rng.normal(0, 0.9, len(_gnn_pkd))
+        @st.cache_data(show_spinner="Running AutoDock Vina docking…")
+        def _vina_scores(smiles_tuple, pocket_pdb, exhaustiveness_value):
+            from src.docking.vina_runner import dock_smiles_batch
+
+            root = Path(__file__).parent.parent / "data"
+            docked = dock_smiles_batch(
+                smiles_tuple,
+                pocket_pdb=pocket_pdb.lower(),
+                data_root=root,
+                exhaustiveness=int(exhaustiveness_value),
+            )
+            return [r.__dict__ for r in docked]
+
+        _vina_results = _vina_scores(tuple(_smiles_list), _rl_pocket, exhaustiveness)
+        _vina_by_smiles = {r["smiles"]: r for r in _vina_results}
+        docked_rows = []
+        failed = []
+        for smi, pkd in zip(_smiles_list, _gnn_pkd):
+            vr = _vina_by_smiles.get(smi, {})
+            if vr.get("vina_score") is None:
+                failed.append(vr.get("error", "Vina failed"))
+                continue
+            docked_rows.append({
+                "smiles": smi,
+                "pocket_pdb": _rl_pocket,
+                "vina_score": float(vr["vina_score"]),
+                "vina_energy_kcal_mol": float(vr["vina_energy_kcal_mol"]),
+                "gnn_pred_pkd": float(pkd),
+            })
+
+        if not docked_rows:
+            reason = failed[0] if failed else "No Vina scores returned."
+            st.warning(f"AutoDock Vina comparison unavailable: {reason}")
+            st.stop()
+
         df = pd.DataFrame({
-            "smiles":       list(_smiles_list),
-            "pocket_pdb":   [_rl_pocket] * len(_gnn_pkd),
-            "vina_score":   _vina,
-            "gnn_pred_pkd": list(_gnn_pkd),
+            "smiles": [r["smiles"] for r in docked_rows],
+            "pocket_pdb": [r["pocket_pdb"] for r in docked_rows],
+            "vina_score": [r["vina_score"] for r in docked_rows],
+            "vina_energy_kcal_mol": [r["vina_energy_kcal_mol"] for r in docked_rows],
+            "gnn_pred_pkd": [r["gnn_pred_pkd"] for r in docked_rows],
         })
         df["abs_error"] = (df["vina_score"] - df["gnn_pred_pkd"]).abs()
-        st.info("GNN pKd: real model predictions on top RL molecules · Vina scores: synthetic proxy (AutoDock Vina not installed)")
+        if failed:
+            st.info(f"Docked {len(df)} molecules with AutoDock Vina; {len(failed)} failed during preparation or docking.")
+        else:
+            st.success(f"Docked {len(df)} molecules with AutoDock Vina.")
+
+    if "vina_energy_kcal_mol" not in df.columns:
+        df["vina_energy_kcal_mol"] = -df["vina_score"]
 
     from scipy.stats import pearsonr
-    r, _  = pearsonr(df["vina_score"], df["gnn_pred_pkd"])
+    r = float(pearsonr(df["vina_score"], df["gnn_pred_pkd"])[0]) if len(df) >= 2 else float("nan")
     rmse  = float(np.sqrt(((df["vina_score"]-df["gnn_pred_pkd"])**2).mean()))
     n_good= int((df["abs_error"] < 1.0).sum())
 
     c1,c2,c3 = st.columns(3)
     r_color = "#15803d" if r>0.7 else "#d97706" if r>0.4 else "#b42318"
+    r_display = f"{r:.3f}" if not np.isnan(r) else "—"
     c1.markdown(f"""<div class="metric-card teal">
         <div class="metric-label">Pearson r</div>
-        <div class="metric-value" style="color:{r_color}">{r:.3f}</div>
+        <div class="metric-value" style="color:{r_color}">{r_display}</div>
         <div class="metric-sub">GNN vs Vina</div>
     </div>""", unsafe_allow_html=True)
     c2.markdown(f"""<div class="metric-card amber">
@@ -1746,7 +2062,7 @@ elif page == "GNN vs Vina":
     sc = (alt.Chart(df)
         .mark_circle(size=90, opacity=0.85)
         .encode(
-            x=alt.X("vina_score:Q",   title="Vina Score (pKd proxy)",
+            x=alt.X("vina_score:Q",   title="Vina affinity proxy (-kcal/mol)",
                     scale=alt.Scale(domain=[lmin,lmax]),
                     axis=alt.Axis(labelColor="#9aa4ae",titleColor="#9aa4ae",gridColor="#e8e0d5")),
             y=alt.Y("gnn_pred_pkd:Q", title="GNN Predicted pKd",
@@ -1755,7 +2071,7 @@ elif page == "GNN vs Vina":
             color=alt.Color("abs_error:Q", title="|Error|",
                             scale=alt.Scale(scheme="orangered"),
                             legend=alt.Legend(labelColor="#5f6b76",titleColor="#5f6b76")),
-            tooltip=["pocket_pdb","vina_score","gnn_pred_pkd","abs_error"],
+            tooltip=["pocket_pdb","vina_energy_kcal_mol","vina_score","gnn_pred_pkd","abs_error"],
         ).properties(height=420)
     )
     diag = (alt.Chart(pd.DataFrame({"x":[lmin,lmax],"y":[lmin,lmax]}))
@@ -1796,11 +2112,11 @@ elif page == "GNN vs Vina":
           <td style="padding:9px 14px">
             <span style="background:#193a3b;color:#7efce1;font-size:0.68rem;
                   font-family:ui-monospace,monospace;padding:2px 8px;border-radius:4px;
-                  font-weight:700">{pocket}</span>
+                  font-weight:700">{escape(str(pocket))}</span>
           </td>
-          <td style="padding:9px 14px;max-width:220px" title="{smi}">
+          <td style="padding:9px 14px;max-width:220px" title="{escape(smi)}">
             <span style="font-family:ui-monospace,monospace;font-size:0.75rem;color:#5f6b76;
-                  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{smi_short}</span>
+                  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{escape(smi_short)}</span>
           </td>
           <td style="padding:9px 14px;font-family:ui-monospace,monospace;font-size:0.85rem;
                      color:#0d4f50;font-weight:600">{vina}</td>
@@ -1839,10 +2155,19 @@ elif page == "GNN vs Vina":
 # PAGE 5 — SQL Console
 # ═════════════════════════════════════════════════════════════════════════════
 elif page == "SQL Console":
-    st.markdown('<div class="section-label">SELECT-only queries against gnnbind database</div>',
-                unsafe_allow_html=True)
+    db_chip = "SQL Server connected" if _db_configured() else "Local demo mode"
+    page_header(
+        "Data Access",
+        "SQL Console",
+        "Run read-only queries against the experiment database, then inspect or export the result set.",
+        [
+            (db_chip, "teal" if _db_configured() else "amber"),
+            ("SELECT only", "blue"),
+        ],
+    )
 
-    DEFAULT_SQL = """SELECT TOP 20
+    QUERY_TEMPLATES = {
+        "Top RL molecules": """SELECT TOP 20
     e.name        AS experiment,
     rl.smiles,
     rl.reward,
@@ -1851,9 +2176,36 @@ elif page == "SQL Console":
     rl.r_sa
 FROM dbo.rl_molecules rl
 JOIN dbo.experiments e ON e.id = rl.experiment_id
-ORDER BY rl.reward DESC"""
+ORDER BY rl.reward DESC""",
+        "Recent binding predictions": """SELECT TOP 20
+    smiles,
+    pocket_pdb,
+    pred_pkd,
+    pred_pose_prob,
+    pred_select_prob,
+    created_at
+FROM dbo.binding_predictions
+ORDER BY created_at DESC""",
+        "Vina benchmark errors": """SELECT TOP 20
+    smiles,
+    pocket_pdb,
+    vina_score,
+    gnn_pred_pkd,
+    ABS(vina_score - gnn_pred_pkd) AS abs_error
+FROM dbo.vina_benchmarks
+ORDER BY abs_error DESC""",
+    }
 
-    sql = st.text_area("SQL Query", value=DEFAULT_SQL, height=200)
+    t1, t2 = st.columns([1.25, 2.75])
+    template_name = t1.selectbox("Query template", list(QUERY_TEMPLATES.keys()))
+    t2.markdown(
+        '<div class="empty-state" style="padding:0.85rem 1rem">'
+        'Queries are intentionally read-only in the UI. In local mode, the database calls return empty demo results.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    sql = st.text_area("SQL Query", value=QUERY_TEMPLATES[template_name], height=230)
 
     c1, c2 = st.columns([1, 5])
     run_btn = c1.button("Run Query")

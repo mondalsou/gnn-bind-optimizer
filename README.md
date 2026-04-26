@@ -72,6 +72,14 @@ jupyter nbconvert --to notebook --execute --inplace \
 streamlit run app/streamlit_app.py
 ```
 
+For real AutoDock Vina scores on the **GNN vs Vina** page, the local app needs
+the `vina` executable on `PATH` plus Meeko's preparation scripts. The Docker
+Streamlit image installs these for cold starts, so the most reproducible route is:
+
+```bash
+docker compose up --build streamlit
+```
+
 ---
 
 ## Project Structure
@@ -145,7 +153,7 @@ Top molecules are amide scaffolds with drug-like properties (SA > 0.79, MW < 500
 | Summary | KPI cards, phase timeline, MTL vs STL bar chart, RL reward curve |
 | Binding Predictor | Input SMILES → GNN pKd + pose prob + selectivity |
 | RL Generator | Top 18 generated molecules — structure, pKd, QED, reward |
-| GNN vs Vina | Parity plot + table: GNN predictions vs Vina benchmark on RL top-20 |
+| GNN vs Vina | Live GNN pKd vs real AutoDock Vina docking on top RL molecules |
 | SQL Console | Raw SELECT query → rendered table + CSV download |
 
 Header badge shows live pocket and best pKd from `rl_results.json`.
@@ -194,4 +202,5 @@ See `ARCHITECTURE.md` for full rationale on:
 - REINFORCE vs PPO for molecular generation
 - Character-level LSTM vs fragment-based generators
 - Oracle approximation (ETKDG + centroid alignment vs full docking)
+- AutoDock Vina comparison path (`autodock-vina` executable + Meeko PDBQT prep)
 - MLflow + SQL Server backend topology
