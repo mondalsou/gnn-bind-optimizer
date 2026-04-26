@@ -25,7 +25,7 @@ docker compose up --build
 # MLflow: http://localhost:5000
 ```
 
-> **Apple Silicon / CPU-only:** Training runs on CPU (HGTConv scatter_reduce not supported on MPS). Full pipeline ~10 min on a modern laptop.
+> **Apple Silicon / CPU-only:** Training runs on CPU (HGTConv scatter_reduce not supported on MPS). On a fresh Apple Silicon cold start, PyG native extensions may compile from source; the observed first end-to-end Docker run took ~55 minutes. Cached rebuilds are much faster.
 
 ### Dry-run (pre-trained checkpoints, skip training)
 
@@ -80,6 +80,16 @@ Streamlit image installs these for cold starts, so the most reproducible route i
 docker compose up --build streamlit
 ```
 
+### Local data and artifacts
+
+Docker Compose keeps project outputs local:
+
+- `./data:/workspace/data` stores processed graphs and RL outputs.
+- `./checkpoints:/workspace/checkpoints` stores GNN and RL checkpoints.
+- `./src` and `./notebooks` are mounted for Streamlit/training development.
+- MLflow metrics are stored in the SQL Server `mlflowdb` Docker volume.
+- New MLflow artifacts are served through the MLflow artifact proxy and stored in the `mlflow_artifacts` Docker volume.
+
 ---
 
 ## Project Structure
@@ -93,6 +103,7 @@ GNNBindOptimizer/
 ├── src/
 │   ├── graph/          # Graph construction utilities
 │   ├── rl/             # SMILESTokenizer, SMILESPolicy, load_policy()
+│   ├── docking/        # AutoDock Vina + Meeko preparation helpers
 │   └── db/             # SQLAlchemy connection helper
 ├── app/
 │   └── streamlit_app.py               # 5-page Streamlit UI
@@ -130,19 +141,21 @@ GNNBindOptimizer/
 | STL (affinity only) | 2.034 | 0.489 | — |
 | **Test set (MTL)** | **1.702** | **0.579** | **0.796** |
 
-MTL improves val RMSE by 5.4% (Δ = 0.11) via Kendall uncertainty-weighted multi-task loss.
+MTL improves validation RMSE by 5.4% (Δ = 0.11) via Kendall uncertainty-weighted multi-task loss. On the small held-out test split, STL is marginally lower-error (`test_rmse=1.683`) than MTL (`test_rmse=1.702`), so this should be read as a demo-scale result rather than a definitive architecture ranking.
 
-### RL Generator (150 steps × 64 mols, pocket 6E9A)
+### RL Generator (150 steps × 64 samples, pocket 6E9A)
 
 | Metric | Value |
 |--------|-------|
-| Total molecules generated | 147 |
+| Total sampled SMILES | 9,600 |
+| Valid molecules collected | 280 |
+| Full-run validity | 2.9% |
 | Top molecules saved | 18 |
-| Best reward | 0.720 |
-| Best predicted pKd | 7.57 |
-| Best mol | `Cc1ccc(C(=O)NCCCCCCC(=O)N=O)cc1` |
+| Best reward | 0.719 |
+| Best predicted pKd | 7.59 |
+| Best-reward mol | `O=C(Nc1ccccc1)c1cccc(C(F)(F)F)c1` |
 
-Top molecules are amide scaffolds with drug-like properties (SA > 0.79, MW < 500). Prior trained for 60 epochs.
+Top saved molecules are reward-ranked valid structures. The low 2.9% validity is an important modeling caveat: the character-level SMILES policy can find useful hits, but it is not yet a chemically robust generator.
 
 ---
 
@@ -158,17 +171,24 @@ Top molecules are amide scaffolds with drug-like properties (SA > 0.79, MW < 500
 
 Header badge shows live pocket and best pKd from `rl_results.json`.
 
+UI smoke test after the cold start:
+
+- Streamlit renders all five pages at `http://localhost:8501`.
+- SQL Console connects to SQL Server and the default read-only query returns rows.
+- MLflow renders at `http://localhost:5000` and shows `gnn_mtl`, `gnn_stl`, and `reinforce_rl`.
+- The GNN vs Vina page defaults to docking 10 molecules; users can lower the slider for faster Vina iteration.
+
 ---
 
 ## MLflow Experiment Tracking
 
-MLflow runs against SQL Server (`mlflowdb` database). Three pre-logged runs in experiment **GNNBindOptimizer**:
+MLflow runs against SQL Server (`mlflowdb` database). The Docker stack uses `MLFLOW_BACKEND_STORE_URI` for the server and `MLFLOW_TRACKING_URI=http://mlflow:5000` for clients so metrics and artifacts route through the tracking server correctly. The cold-start experiment is **gnn_bind_optimizer**:
 
 | Run | Key metrics |
 |-----|-------------|
-| `gnn_mtl_baseline` | val_rmse=1.924, Pearson r=0.541, Pose AUC=0.778 — 30-epoch convergence curve |
-| `gnn_stl_ablation` | val_rmse=2.034, Pearson r=0.489 — 17-epoch convergence curve |
-| `rl_reinforce_egfr` | best_pkd=7.57, best_reward=0.720, validity=100% — reward curve (mean + max per step) |
+| `gnn_mtl` | best_val_rmse=1.924, test_rmse=1.702, test_pearson_r=0.579, test_pose_auc=0.796 |
+| `gnn_stl` | best_val_rmse=2.034, test_rmse=1.683, test_pearson_r=0.603 |
+| `reinforce_rl` | best_pred_pkd=7.59, best_reward_total=0.719, total_valid=280, validity_rate=2.9% |
 
 To backfill MLflow from existing checkpoints + TensorBoard logs:
 ```bash

@@ -108,18 +108,31 @@ Affinity weight (0.5) deliberately dominates to bias toward high-affinity molecu
 
 ![Part 3 results](data/rl_results/phase3_results.png)
 
-*Fig 5. RL training summary (150 steps, batch 64, prior 60 epochs, reference pocket 6E9A pKd=11.92). a) Reward dynamics — mean and max per step. b) Validity and KL penalty vs frozen prior. c) Top generated molecules: QED vs predicted pKd scatter (best pKd=7.57). d) Oracle pKd distribution over all valid molecules scored (n=147 total, 18 top saved).*
+*Fig 5. RL training summary (150 steps, batch 64, prior 60 epochs, reference pocket 6E9A pKd=11.92). a) Reward dynamics — mean and max per step. b) Validity and KL penalty vs frozen prior. c) Top generated molecules: QED vs predicted pKd scatter. d) Oracle pKd distribution over reward-ranked valid molecules. The full RL run sampled 9,600 SMILES, collected 280 valid molecules, and saved the top 18 reward-ranked molecules.*
 
 **Summary (from `data/rl_results/rl_results.json`):**
 
 | Metric | Value |
 |--------|-------|
-| Total generated | 147 |
+| Total sampled SMILES | 9,600 |
+| Valid molecules collected | 280 |
+| Full-run validity | 2.9% |
 | Top molecules saved | 18 |
-| Best reward | 0.720 |
-| Best predicted pKd | 7.57 |
+| Best reward | 0.719 |
+| Best predicted pKd | 7.59 |
 | Prior epochs | 60 |
 | RL steps | 150 × 64 batch |
+
+### How to read the RL curves
+
+The RL x-axis is **training step**, not supervised-learning epoch. Each step samples a batch of 64 SMILES, computes reward, and applies one REINFORCE update.
+
+- **Mean reward** shows batch-level policy quality. A sustained rise means the policy is generating better molecules more consistently.
+- **Max reward** shows the best molecule in a batch. Spikes are useful hits, but they are weaker evidence if mean reward and validity stay low.
+- **Validity** must be read together with reward. Low validity means many sampled strings are chemically invalid, so the reward signal is sparse and unstable.
+- **KL penalty** measures drift from the frozen prior. A rising KL with falling validity suggests the policy is leaving the chemically learned prior too aggressively.
+
+In the observed cold-start run, the policy found a best predicted pKd near 7.59, but later batches collapsed to very low validity and reward near zero. This makes the RL stage a working proof of concept rather than a production-grade molecular generator.
 
 ### Oracle: frozen GNN as proxy scorer
 Generated SMILES → ETKDG 3D conformer → centroid alignment to reference pocket → GNN predicts pKd. **Limitation:** ETKDG + rigid centroid alignment is a coarse approximation of docking. A production system would call AutoDock Vina or FEP+ for scoring. The GNN oracle is used here as a fast differentiable proxy consistent with the exercise scope.
@@ -140,7 +153,7 @@ Five tables capture the full experimental lifecycle:
 
 **Why SQL Server?** The exercise specification required it. For a pure research workflow, PostgreSQL or DuckDB would suffice. SQL Server 2022 Express handles the dataset sizes here without issue.
 
-**MLflow backend:** MLflow stores run metadata in a dedicated `mlflowdb` database (separate from `gnnbind`) to avoid schema conflicts — MLflow auto-creates its own `experiments` table with a different primary-key convention than `dbo.experiments`. The tracking URI is `mssql+pyodbc://sa:<pw>@sqlserver/mlflowdb?driver=ODBC+Driver+18+for+SQL+Server`.
+**MLflow backend:** MLflow stores run metadata in a dedicated `mlflowdb` database (separate from `gnnbind`) to avoid schema conflicts — MLflow auto-creates its own `experiments` table with a different primary-key convention than `dbo.experiments`. The server uses `MLFLOW_BACKEND_STORE_URI=mssql+pyodbc://.../mlflowdb`, while trainer, RL, and UI clients use `MLFLOW_TRACKING_URI=http://mlflow:5000`. This separation is important: metrics still persist to SQL Server, and artifacts route through the MLflow server artifact proxy into the `mlflow_artifacts` Docker volume.
 
 **Backfilling MLflow from existing checkpoints:** `scripts/log_existing_runs.py` reads checkpoint filenames (regex on `epoch=N-val_rmse=X`) and TensorBoard `lightning_logs/` events to reconstruct per-epoch convergence curves (`val_rmse`, `val_pearson_r`, `val_auc_pose`, `train_loss`) as MLflow step metrics. This enables convergence graphs in the MLflow UI without re-running training.
 
@@ -155,6 +168,16 @@ Five tables capture the full experimental lifecycle:
 
 *Fig. Overview of the pipeline.*
 
+Observed cold-start behavior:
+
+1. `sqlserver` starts SQL Server 2022 and initializes `gnnbind` plus `mlflowdb`.
+2. `mlflow` starts MLflow 2.12.1 on `http://localhost:5000`.
+3. `gnn-trainer` executes notebooks 01 and 02, then exits with status 0.
+4. `rl-agent` waits for trainer success, executes notebook 03, logs live metrics to MLflow, writes RL outputs, then exits with status 0.
+5. `streamlit` remains up on `http://localhost:8501`.
+
+The verified cold-start run produced three MLflow runs in experiment `gnn_bind_optimizer`: `gnn_mtl`, `gnn_stl`, and `reinforce_rl`. During RL training, MLflow showed `reinforce_rl` as `RUNNING` and metric histories (`reward_mean`, `validity`, `pg_loss`, `kl_penalty_mean`) updated live.
+
 
 ### Dry-run (pre-trained checkpoints)
 
@@ -168,7 +191,8 @@ Skips `gnn-trainer` and `rl-agent`. MLflow is populated from existing checkpoint
 ### ARM64 / Apple Silicon notes
 
 - ODBC driver: apt source uses `$(dpkg --print-architecture)` — resolves to `arm64` on Apple Silicon instead of hardcoded `amd64`
-- PyG: only `torch-geometric==2.5.2` is installed in containers; `torch-scatter`, `torch-sparse`, `torch-cluster` are dropped (no ARM64 pre-built wheels, no C++ compiler in image). HGTConv inference works without them.
+- PyG: on Apple Silicon / Linux ARM64, `torch-scatter`, `torch-sparse`, and `torch-cluster` may compile from source because prebuilt wheels are not always available. This is the largest first cold-start cost.
+- Docker image hygiene: `.dockerignore` excludes `data/`, `checkpoints/`, and `graphify-out/`; these are mounted at runtime instead of copied into images.
 - Training runs on CPU (`MPS` not used — `scatter_reduce` unsupported on MPS backend).
 
 ---
@@ -182,10 +206,17 @@ Five pages, dark glassmorphism design (Space Grotesk + Instrument Serif, warm cr
 | **Summary** | KPI cards (RMSE, Pearson r, Pose AUC, best pKd), 3-phase project cards, MTL vs STL bar chart, RL reward curve (mean + max) |
 | **Binding Predictor** | SMILES input → GNN inference → pKd, pose probability, selectivity metric cards + 2D structure |
 | **RL Generator** | Dynamic pocket chip (⬡ Pocket 6E9A · pKd 11.92), card grid of top 18 molecules (structure SVG, pKd, QED, reward) |
-| **GNN vs Vina** | Live GNN inference on RL top molecules → Meeko PDBQT prep → AutoDock Vina docking → parity scatter + table |
+| **GNN vs Vina** | Live GNN inference on RL top molecules → Meeko PDBQT prep → AutoDock Vina docking → parity scatter + table. Defaults to 10 molecules because Vina is slower than the GNN oracle. |
 | **SQL Console** | Free-text SELECT → result table + CSV download |
 
 Header badge is dynamic — reads `ref_pocket` and `ref_pkd` from `rl_results.json` at startup.
+
+Post-run UI verification:
+
+- Summary, Binding Predictor, RL Generator, GNN vs Vina, and SQL Console all render in Streamlit.
+- SQL Console connects to SQL Server and the default read-only query returns rows.
+- MLflow UI renders the three cold-start runs under `gnn_bind_optimizer`.
+- Browser console showed Vega/Altair warnings for empty chart extents, but no blocking UI errors.
 
 ---
 
@@ -193,7 +224,7 @@ Header badge is dynamic — reads `ref_pocket` and `ref_pkd` from `rl_results.js
 
 1. **Dataset size (150 samples):** PDBbind refined set filtered to 150 for speed. Production training would use 5000+ complexes with cross-validation across protein families. MTL benefit over STL is expected to be more pronounced at that scale.
 2. **Oracle fidelity:** The RL loop still uses the fast frozen GNN oracle, while the Streamlit comparison page can now run AutoDock Vina post hoc for top generated molecules. A production RL loop would call AutoDock Vina or FEP+ during scoring rather than only for comparison.
-3. **SMILES generator validity:** Character-level LSTM achieves high validity on this run (100% reported); fragment-based generators (REINVENT 4, GraphINVENT) typically yield more structurally diverse output.
+3. **SMILES generator validity:** The observed full-run validity is low (280 valid molecules from 9,600 sampled SMILES; 2.9%). This is expected for a small character-level SMILES policy under sparse REINFORCE reward. SELFIES, a fragment-based generator, larger chemical pretraining, and explicit validity shaping would improve robustness.
 4. **Selectivity labels:** Binary EGFR/ABL1 selectivity head uses synthetic labels derived from known inhibitor annotations. Real selectivity data would require paired kinase assay results.
 5. **No 3D equivariance:** HGTConv is not SE(3)-equivariant. Switching to DimeNet++ or EGNN would improve geometric fidelity for affinity prediction.
 6. **MLflow convergence curves (dry-run):** `log_existing_runs.py` reconstructs curves from TensorBoard events; step alignment is approximate (per-batch train steps bucketed by epoch tag). Live training logs directly to MLflow with exact step correspondence.
