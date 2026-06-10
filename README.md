@@ -2,6 +2,8 @@
 
 Heterogeneous GNN for protein-ligand binding affinity prediction + REINFORCE-based molecular generator, with SQL Server persistence, MLflow experiment tracking, and Streamlit UI.
 
+> **Model lifecycle and reproducibility focus**: This project is built with the discipline of a production ML system — experiment tracking via MLflow, SQL-backed data persistence, Docker-containerized training, and validated checkpoints. Every result is logged, versioned, and reproducible from a cold start. This reflects the standards required in regulated scientific computing environments where model credibility and traceability are first-class requirements.
+
 ![Overview](Figs/Overview.png)
 
 *Fig 1. Overview of the pipeline.*
@@ -210,6 +212,35 @@ See `db/init.sql` for full DDL. Five tables:
 | `vina_benchmarks` | GNN vs Vina correlation |
 
 MLflow uses a separate `mlflowdb` database to avoid schema conflicts with `dbo.experiments`.
+
+---
+
+## Model lifecycle management and reproducibility
+
+This project treats ML lifecycle management as a first-class concern — not an afterthought. The infrastructure decisions reflect how models need to be managed in regulated or high-accountability scientific environments:
+
+**Experiment tracking (MLflow)**
+- All training runs (`gnn_mtl`, `gnn_stl`, `reinforce_rl`) are logged to a persistent MLflow server backed by SQL Server
+- Key metrics (RMSE, Pearson r, Pose AUC, pKd, reward) are logged per epoch and per run
+- Model artifacts (checkpoints) are stored and versioned via the MLflow artifact proxy
+- `scripts/log_existing_runs.py` backfills MLflow from TensorBoard logs + existing checkpoints, so no run is ever lost
+
+**Reproducibility**
+- Full cold-start via `docker compose up --build` — no manual setup, no undocumented steps
+- Dry-run mode allows UI validation from pre-trained checkpoints without retraining
+- All data splits and graph construction are deterministic and documented
+- `ARCHITECTURE.md` records every design decision and the trade-off rationale
+
+**Validation discipline**
+- Three-way train/val/test split with held-out test evaluation reported separately from validation
+- MTL vs STL ablation logged as separate MLflow runs for direct comparison
+- Model caveats documented honestly (e.g., demo-scale dataset, low SMILES validity in RL)
+
+**Data lineage**
+- SQL Server schema tracks raw predictions, RL-generated molecules, and Vina benchmark results in separate tables
+- `vina_benchmarks` table enables direct GNN-vs-docking comparison with full traceability
+
+This stack — MLflow + SQL Server + Docker + checkpoint management — is directly analogous to the model lifecycle infrastructure needed for AI-assisted scientific computing in pharmaceutical development.
 
 ---
 
